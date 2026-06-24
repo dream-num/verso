@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { chmodSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 import { type PlatformBinary, resolvePlatformBinary } from './resolve.js';
@@ -17,10 +18,25 @@ function resolveInstalledBinaryPath({ packageName, binaryName }: PlatformBinary)
   }
 }
 
+function normalizeCliArgs(args: string[]): string[] {
+  return args[0] === '--' ? args.slice(1) : args;
+}
+
+function ensureExecutable(binaryPath: string): void {
+  if (process.platform === 'win32') {
+    return;
+  }
+
+  chmodSync(binaryPath, 0o755);
+}
+
 function main(): never {
   const platformBinary = resolvePlatformBinary();
   const binaryPath = resolveInstalledBinaryPath(platformBinary);
-  const result = spawnSync(binaryPath, process.argv.slice(2), {
+
+  ensureExecutable(binaryPath);
+
+  const result = spawnSync(binaryPath, normalizeCliArgs(process.argv.slice(2)), {
     stdio: 'inherit',
   });
 
@@ -42,5 +58,8 @@ try {
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(message);
+  if (error instanceof Error && error.cause instanceof Error) {
+    console.error(error.cause.message);
+  }
   process.exit(1);
 }
