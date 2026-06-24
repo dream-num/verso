@@ -1,0 +1,18 @@
+[workspace]
+members = ["crates/verso"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/univerkit/verso"
+homepage = "https://github.com/univerkit/verso"
+authors = ["UniverKit contributors"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"

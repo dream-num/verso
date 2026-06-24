@@ -1,0 +1,58 @@
+{
+  "name": "@univerkit/verso",
+  "version": "0.1.0",
+  "description": "A focused release CLI for JavaScript workspace packages.",
+  "license": "MIT",
+  "author": "DreamNum Co., Ltd. <developer@univer.ai>",
+  "homepage": "https://github.com/dream-num/verso#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dream-num/verso.git",
+    "directory": "packages/verso"
+  },
+  "bugs": {
+    "url": "https://github.com/dream-num/verso/issues"
+  },
+  "keywords": [
+    "release",
+    "changelog",
+    "semver",
+    "workspace",
+    "monorepo",
+    "cli"
+  ],
+  "type": "module",
+  "bin": {
+    "verso": "bin/verso.js"
+  },
+  "exports": {
+    "./resolve": {
+      "types": "./dist/resolve.d.ts",
+      "default": "./dist/resolve.js"
+    }
+  },
+  "files": [
+    "bin",
+    "dist",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-bin.mts",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "pnpm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "pnpm run build && tsc -p tsconfig.test.json && node --test test-dist/**/*.test.js"
+  },
+  "optionalDependencies": {
+    "@univerkit/verso-darwin-arm64": "0.1.0",
+    "@univerkit/verso-darwin-x64": "0.1.0",
+    "@univerkit/verso-linux-arm64": "0.1.0",
+    "@univerkit/verso-linux-x64": "0.1.0",
+    "@univerkit/verso-win32-x64": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "typescript": "^6.0.3"
+  }
+}

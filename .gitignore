@@ -1,0 +1,10 @@
+/target/
+/node_modules/
+/packages/*/dist/
+/packages/*/bin/
+/packages/*/verso
+/packages/*/verso.exe
+*.tgz
+.DS_Store
+
+docs/superpowers

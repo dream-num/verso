@@ -1,0 +1,27 @@
+{
+  "name": "@univerkit/verso-repo",
+  "private": true,
+  "description": "A focused release CLI for JavaScript workspace packages.",
+  "license": "MIT",
+  "author": "DreamNum Co., Ltd. <developer@univer.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dream-num/verso.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dream-num/verso/issues"
+  },
+  "homepage": "https://github.com/dream-num/verso#readme",
+  "packageManager": "pnpm@10.33.4",
+  "scripts": {
+    "build": "pnpm --filter @univerkit/verso build",
+    "check": "pnpm run check:rust && pnpm run check:npm",
+    "check:npm": "pnpm --filter @univerkit/verso typecheck && pnpm --filter @univerkit/verso test && pnpm run pack:check",
+    "check:rust": "cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --all",
+    "pack:check": "pnpm --filter @univerkit/verso pack --dry-run && pnpm --filter \"./packages/verso-*\" pack --dry-run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "typescript": "^6.0.3"
+  }
+}

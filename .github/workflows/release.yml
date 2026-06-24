@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, such as v0.1.0'
+        required: true
+        type: string
+
+jobs:
+  build-binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            package: verso-darwin-arm64
+            binary: verso
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            package: verso-darwin-x64
+            binary: verso
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            package: verso-linux-x64
+            binary: verso
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            package: verso-linux-arm64
+            binary: verso
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            package: verso-win32-x64
+            binary: verso.exe
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      - run: cargo build --release --target ${{ matrix.target }} -p verso
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.package }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+
+  publish:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Copy binaries into platform packages
+        run: |
+          node scripts/copy-binary-to-platform-package.mts packages/verso-darwin-arm64 artifacts/verso-darwin-arm64/verso
+          node scripts/copy-binary-to-platform-package.mts packages/verso-darwin-x64 artifacts/verso-darwin-x64/verso
+          node scripts/copy-binary-to-platform-package.mts packages/verso-linux-arm64 artifacts/verso-linux-arm64/verso
+          node scripts/copy-binary-to-platform-package.mts packages/verso-linux-x64 artifacts/verso-linux-x64/verso
+          node scripts/copy-binary-to-platform-package.mts packages/verso-win32-x64 artifacts/verso-win32-x64/verso.exe
+
+      - run: node scripts/verify-platform-packages.mts
+
+      - run: pnpm --filter @univerkit/verso build
+
+      - run: pnpm --filter './packages/verso-*' publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - run: pnpm --filter @univerkit/verso publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

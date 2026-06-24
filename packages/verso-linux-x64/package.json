@@ -1,0 +1,25 @@
+{
+  "name": "@univerkit/verso-linux-x64",
+  "version": "0.1.0",
+  "description": "Linux x64 binary for @univerkit/verso.",
+  "license": "MIT",
+  "author": "DreamNum Co., Ltd. <developer@univer.ai>",
+  "homepage": "https://github.com/dream-num/verso#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dream-num/verso.git",
+    "directory": "packages/verso-linux-x64"
+  },
+  "bugs": {
+    "url": "https://github.com/dream-num/verso/issues"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/verso"
+  ]
+}
