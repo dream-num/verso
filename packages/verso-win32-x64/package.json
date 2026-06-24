@@ -1,6 +1,6 @@
 {
   "name": "@univerkit/verso-win32-x64",
-  "version": "0.1.0",
+  "version": "1.0.0-alpha.0",
   "description": "Windows x64 binary for @univerkit/verso.",
   "license": "MIT",
   "author": "DreamNum Co., Ltd. <developer@univer.ai>",
