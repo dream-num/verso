@@ -122,9 +122,20 @@ packages, publishes the platform packages first, and then publishes
 
 ## Publishing
 
-The `Release` GitHub Actions workflow runs for `v*` tags and can also be run
-manually with a tag input. Configure the repository secret `NPM_TOKEN` with
-publish access for the `@univerkit` npm scope before publishing.
+Releases are split into two GitHub Actions workflows.
+
+`Prepare Release` is run manually with a target version. It updates package
+versions, updates `CHANGELOG.md`, creates the release commit, creates the tag,
+and pushes both back to the repository.
+
+`Release` runs for `v*` tags and can also be run manually with a tag input. It
+builds the platform binaries and publishes npm packages.
+
+Configure these repository secrets before publishing:
+
+- `RELEASE_TOKEN`: a token with repository contents read/write access. This is
+  used by `Prepare Release` to push the release commit and tag.
+- `NPM_TOKEN`: an npm token with publish access for the `@univerkit` scope.
 
 ## Development
 

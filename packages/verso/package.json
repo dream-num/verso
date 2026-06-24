@@ -45,11 +45,11 @@
     "test": "pnpm run build && tsc -p tsconfig.test.json && node --test test-dist/**/*.test.js"
   },
   "optionalDependencies": {
-    "@univerkit/verso-darwin-arm64": "0.1.0",
-    "@univerkit/verso-darwin-x64": "0.1.0",
-    "@univerkit/verso-linux-arm64": "0.1.0",
-    "@univerkit/verso-linux-x64": "0.1.0",
-    "@univerkit/verso-win32-x64": "0.1.0"
+    "@univerkit/verso-darwin-arm64": "workspace:*",
+    "@univerkit/verso-darwin-x64": "workspace:*",
+    "@univerkit/verso-linux-arm64": "workspace:*",
+    "@univerkit/verso-linux-x64": "workspace:*",
+    "@univerkit/verso-win32-x64": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

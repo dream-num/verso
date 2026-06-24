@@ -1,0 +1,13 @@
+[version]
+root_package = "packages/verso/package.json"
+
+[workspaces]
+patterns = ["packages/*"]
+include_root = false
+
+[changelog]
+infile = "CHANGELOG.md"
+
+[git]
+commit_message = "chore(release): release v${version}"
+tag_name = "v${version}"

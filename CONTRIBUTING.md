@@ -30,9 +30,12 @@ to stay focused, so new behavior should have a clear release-workflow use case.
 
 ## Publishing
 
-Publishing is handled by GitHub Actions. Push a `v*` tag or run the `Release`
-workflow manually with a tag input.
+Publishing is handled by GitHub Actions. Run the `Prepare Release` workflow
+with a target version to update package versions, write the changelog, commit,
+tag, and push. The pushed `v*` tag then triggers the `Release` workflow, which
+builds binaries and publishes npm packages.
 
-The repository must define `NPM_TOKEN` with publish access for the `@univerkit`
-npm scope. The workflow publishes platform packages before publishing the main
+The repository must define `RELEASE_TOKEN` with repository contents read/write
+access and `NPM_TOKEN` with publish access for the `@univerkit` npm scope. The
+publish workflow publishes platform packages before publishing the main
 `@univerkit/verso` wrapper.
