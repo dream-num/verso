@@ -130,20 +130,23 @@ reading release config.
 Verso reads the config, discovers matching `package.json` files, checks that
 versions are consistent when configured to do so, and resolves the target
 version. During a real release, it asks for confirmation before updating release
-files, committing, tagging, and pushing. Passing `--yes` skips those
-confirmations. Updating release files changes package files, any configured
-Cargo manifests, and their nearest `Cargo.lock` files when present, and prepends
-`CHANGELOG.md`.
+files, committing, tagging, and pushing. These confirmations default to yes:
+press Enter to continue, or answer `n` to stop before the next step. Passing
+`--yes` skips those confirmations. Updating release files changes package files,
+any configured Cargo manifests, and their nearest `Cargo.lock` files when
+present, and prepends `CHANGELOG.md`.
 
 Dry runs do not write files or run mutating git commands. They print the
 current version, target version, warnings, changelog path, planned git commands,
 and a tree of version files that would be updated.
 
-If a local release step fails, Verso makes a best-effort rollback of files it
+If a local release command fails, Verso makes a best-effort rollback of files it
 modified, unstages release paths, and cleans up local release state where that
-is safe. If the final push fails, the local release commit and tag are left in
-place so you can fix the remote problem and run `git push --follow-tags`.
-Rollback after a successful remote push is a manual operation.
+is safe. If you answer `n` to a release confirmation, Verso stops without
+rolling back already completed steps. If the final push fails, the local release
+commit and tag are left in place so you can fix the remote problem and run
+`git push --follow-tags`. Rollback after a successful remote push is a manual
+operation.
 
 ## Distribution
 

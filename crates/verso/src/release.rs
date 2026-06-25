@@ -102,12 +102,10 @@ pub fn run(cli: Cli) -> Result<(), String> {
         &target_version,
         &changelog_entry,
     )?;
-    if let Err(error) = confirm_release_step(
+    confirm_release_step(
         &format!("Commit release files with \"{commit_message}\"?"),
         cli.yes,
-    ) {
-        return Err(rollback_commit_failure(&root, &release_files, error));
-    }
+    )?;
     if let Err(error) = git_add_release_files(&root, &release_files.changed_paths) {
         return Err(rollback_add_failure(&root, &release_files, error));
     }
@@ -115,15 +113,7 @@ pub fn run(cli: Cli) -> Result<(), String> {
         return Err(rollback_commit_failure(&root, &release_files, error));
     }
     let release_head = git::current_head(&root)?;
-    if let Err(error) = confirm_release_step(&format!("Create tag {tag_name}?"), cli.yes) {
-        return Err(rollback_tag_failure(
-            &root,
-            &release_files,
-            &before_head,
-            &release_head,
-            error,
-        ));
-    }
+    confirm_release_step(&format!("Create tag {tag_name}?"), cli.yes)?;
     if let Err(error) = git::git(&root, &["tag", "-a", &tag_name, "-m", &tag_name]) {
         return Err(rollback_tag_failure(
             &root,
@@ -199,13 +189,7 @@ fn confirm_non_forward_version(
         return Ok(());
     }
 
-    let answer =
-        read_prompt("Target version is not greater than current version. Continue? [y/N] ")?;
-    if matches!(answer.as_str(), "y" | "Y" | "yes" | "YES" | "Yes") {
-        Ok(())
-    } else {
-        Err("release aborted".to_string())
-    }
+    confirm_default_yes("Target version is not greater than current version. Continue?")
 }
 
 fn prompt_prerelease_version(
@@ -245,11 +229,14 @@ fn confirm_release_step(question: &str, assume_yes: bool) -> Result<(), String> 
         return Ok(());
     }
 
-    let answer = read_prompt(&format!("{question} [y/N] "))?;
-    if matches!(answer.as_str(), "y" | "Y" | "yes" | "YES" | "Yes") {
-        Ok(())
-    } else {
-        Err("release aborted".to_string())
+    confirm_default_yes(question)
+}
+
+fn confirm_default_yes(question: &str) -> Result<(), String> {
+    let answer = read_prompt(&format!("{question} [Y/n] "))?;
+    match answer.as_str() {
+        "" | "y" | "Y" | "yes" | "YES" | "Yes" => Ok(()),
+        _ => Err("release aborted".to_string()),
     }
 }
 

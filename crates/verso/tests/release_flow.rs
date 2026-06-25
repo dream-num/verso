@@ -103,16 +103,50 @@ fn release_prompts_before_each_mutating_step() -> Result<(), Box<dyn std::error:
         .assert()
         .failure()
         .stdout(predicate::str::contains(
-            "Modify release files for 0.2.0? [y/N]",
+            "Modify release files for 0.2.0? [Y/n]",
         ))
         .stdout(predicate::str::contains(
-            "Commit release files with \"chore(release): release v0.2.0\"? [y/N]",
+            "Commit release files with \"chore(release): release v0.2.0\"? [Y/n]",
         ))
-        .stdout(predicate::str::contains("Create tag v0.2.0? [y/N]"))
+        .stdout(predicate::str::contains("Create tag v0.2.0? [Y/n]"))
         .stdout(predicate::str::contains(
-            "Push release commit and tag? [y/N]",
+            "Push release commit and tag? [Y/n]",
         ))
         .stderr(predicate::str::contains("git push --follow-tags"));
+
+    Ok(())
+}
+
+#[test]
+fn release_confirmation_defaults_to_yes() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = TempDir::new()?;
+    write_release_fixture(repo.path())?;
+
+    Command::cargo_bin("verso")?
+        .current_dir(repo.path())
+        .args(["--version", "0.2.0"])
+        .write_stdin("\n\n\n\n")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "Modify release files for 0.2.0? [Y/n]",
+        ))
+        .stdout(predicate::str::contains(
+            "Commit release files with \"chore(release): release v0.2.0\"? [Y/n]",
+        ))
+        .stdout(predicate::str::contains("Create tag v0.2.0? [Y/n]"))
+        .stdout(predicate::str::contains(
+            "Push release commit and tag? [Y/n]",
+        ))
+        .stderr(predicate::str::contains("git push --follow-tags"));
+
+    assert!(
+        fs::read_to_string(repo.path().join("package.json"))?.contains("\"version\": \"0.2.0\"")
+    );
+    assert_eq!(
+        git_stdout(repo.path(), &["tag", "--list", "v0.2.0"])?.trim(),
+        "v0.2.0"
+    );
 
     Ok(())
 }
@@ -130,7 +164,7 @@ fn abort_before_modifying_release_files_leaves_worktree_clean(
         .assert()
         .failure()
         .stdout(predicate::str::contains(
-            "Modify release files for 0.2.0? [y/N]",
+            "Modify release files for 0.2.0? [Y/n]",
         ))
         .stderr(predicate::str::contains("release aborted"));
 
@@ -151,7 +185,7 @@ fn abort_before_modifying_release_files_leaves_worktree_clean(
 }
 
 #[test]
-fn abort_before_commit_rolls_back_release_files() -> Result<(), Box<dyn std::error::Error>> {
+fn abort_before_commit_keeps_release_files() -> Result<(), Box<dyn std::error::Error>> {
     let repo = TempDir::new()?;
     write_release_fixture(repo.path())?;
     let before_head = git_stdout(repo.path(), &["rev-parse", "HEAD"])?;
@@ -163,32 +197,29 @@ fn abort_before_commit_rolls_back_release_files() -> Result<(), Box<dyn std::err
         .assert()
         .failure()
         .stdout(predicate::str::contains(
-            "Commit release files with \"chore(release): release v0.2.0\"? [y/N]",
+            "Commit release files with \"chore(release): release v0.2.0\"? [Y/n]",
         ))
         .stderr(predicate::str::contains("release aborted"));
 
     assert!(
-        fs::read_to_string(repo.path().join("package.json"))?.contains("\"version\": \"0.1.0\"")
+        fs::read_to_string(repo.path().join("package.json"))?.contains("\"version\": \"0.2.0\"")
     );
-    assert!(!fs::read_to_string(repo.path().join("CHANGELOG.md"))?.contains("0.2.0"));
+    assert!(fs::read_to_string(repo.path().join("CHANGELOG.md"))?.contains("0.2.0"));
     assert_eq!(
         git_stdout(repo.path(), &["rev-parse", "HEAD"])?,
         before_head
     );
-    assert_eq!(
-        git_stdout(repo.path(), &["status", "--porcelain"])?,
-        String::new()
-    );
+    let status = git_stdout(repo.path(), &["status", "--porcelain"])?;
+    assert!(status.contains(" M CHANGELOG.md"));
+    assert!(status.contains(" M package.json"));
 
     Ok(())
 }
 
 #[test]
-fn abort_before_tag_rolls_back_release_commit_and_files() -> Result<(), Box<dyn std::error::Error>>
-{
+fn abort_before_tag_keeps_release_commit_and_files() -> Result<(), Box<dyn std::error::Error>> {
     let repo = TempDir::new()?;
     write_release_fixture(repo.path())?;
-    let before_head = git_stdout(repo.path(), &["rev-parse", "HEAD"])?;
 
     Command::cargo_bin("verso")?
         .current_dir(repo.path())
@@ -196,17 +227,15 @@ fn abort_before_tag_rolls_back_release_commit_and_files() -> Result<(), Box<dyn 
         .write_stdin("y\ny\nn\n")
         .assert()
         .failure()
-        .stdout(predicate::str::contains("Create tag v0.2.0? [y/N]"))
+        .stdout(predicate::str::contains("Create tag v0.2.0? [Y/n]"))
         .stderr(predicate::str::contains("release aborted"));
 
     assert!(
-        fs::read_to_string(repo.path().join("package.json"))?.contains("\"version\": \"0.1.0\"")
+        fs::read_to_string(repo.path().join("package.json"))?.contains("\"version\": \"0.2.0\"")
     );
-    assert!(!fs::read_to_string(repo.path().join("CHANGELOG.md"))?.contains("0.2.0"));
-    assert_eq!(
-        git_stdout(repo.path(), &["rev-parse", "HEAD"])?,
-        before_head
-    );
+    assert!(fs::read_to_string(repo.path().join("CHANGELOG.md"))?.contains("0.2.0"));
+    assert!(git_stdout(repo.path(), &["log", "-1", "--pretty=%s"])?
+        .contains("chore(release): release v0.2.0"));
     assert_eq!(
         git_stdout(repo.path(), &["status", "--porcelain"])?,
         String::new()
@@ -232,7 +261,7 @@ fn abort_before_push_keeps_local_release_commit_and_tag() -> Result<(), Box<dyn 
         .assert()
         .failure()
         .stdout(predicate::str::contains(
-            "Push release commit and tag? [y/N]",
+            "Push release commit and tag? [Y/n]",
         ))
         .stderr(predicate::str::contains("release aborted"));
 
@@ -381,7 +410,7 @@ fn explicit_non_forward_version_requires_confirmation() -> Result<(), Box<dyn st
         .assert()
         .failure()
         .stdout(predicate::str::contains(
-            "Target version is not greater than current version. Continue? [y/N]",
+            "Target version is not greater than current version. Continue? [Y/n]",
         ))
         .stderr(predicate::str::contains("release aborted"));
 
@@ -392,9 +421,20 @@ fn explicit_non_forward_version_requires_confirmation() -> Result<(), Box<dyn st
         .assert()
         .failure()
         .stdout(predicate::str::contains(
-            "Target version is not greater than current version. Continue? [y/N]",
+            "Target version is not greater than current version. Continue? [Y/n]",
         ))
         .stderr(predicate::str::contains("release aborted"));
+
+    Command::cargo_bin("verso")?
+        .current_dir(repo.path())
+        .args(["--dry-run", "--version", "0.1.0"])
+        .write_stdin("\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Target version is not greater than current version. Continue? [Y/n]",
+        ))
+        .stdout(predicate::str::contains("Target version: 0.1.0"));
 
     Command::cargo_bin("verso")?
         .current_dir(repo.path())
