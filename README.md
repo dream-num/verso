@@ -110,7 +110,7 @@ pnpm release -- --help
 | `--dry-run` | `false` | Preview the release without writing files or running mutating git commands. |
 | `--version <SEMVER>` | None | Use an exact target version without interactive selection. |
 | `--config <PATH>` | `verso.toml` | Read a different config file. |
-| `--yes` | `false` | Skip the final confirmation prompt. It does not choose a version. |
+| `--yes` | `false` | Skip release confirmation prompts. It does not choose a version. |
 | `-V, --tool-version` | None | Print the Verso CLI version. |
 | `--help` | None | Print CLI help. |
 
@@ -118,19 +118,22 @@ Without `--version`, Verso prompts for patch, minor, major, alpha, beta, rc, or
 custom semver. Exact versions can be passed with `--version`, including
 prereleases such as `0.26.0-alpha.0`, `0.26.0-beta.1`, and `0.26.0-rc.2`.
 
-Use `--config` to point at a different config file. Use `--yes` to skip the
-confirmation shown when an explicit target version is not greater than the
-current version. `--yes` does not choose a version for you; without `--version`,
-interactive version selection still runs. Use `-V` or `--tool-version` to print
-the installed Verso CLI version without reading release config.
+Use `--config` to point at a different config file. Use `--yes` to skip release
+confirmation prompts, including the confirmation shown when an explicit target
+version is not greater than the current version. `--yes` does not choose a
+version for you; without `--version`, interactive version selection still runs.
+Use `-V` or `--tool-version` to print the installed Verso CLI version without
+reading release config.
 
 ## What A Release Does
 
 Verso reads the config, discovers matching `package.json` files, checks that
-versions are consistent when configured to do so, resolves the target version,
-updates the release package files, any configured Cargo manifests, and their
-nearest `Cargo.lock` files when present, prepends `CHANGELOG.md`, commits,
-tags, and pushes.
+versions are consistent when configured to do so, and resolves the target
+version. During a real release, it asks for confirmation before updating release
+files, committing, tagging, and pushing. Passing `--yes` skips those
+confirmations. Updating release files changes package files, any configured
+Cargo manifests, and their nearest `Cargo.lock` files when present, and prepends
+`CHANGELOG.md`.
 
 Dry runs do not write files or run mutating git commands. They print the
 current version, target version, warnings, changelog path, planned git commands,

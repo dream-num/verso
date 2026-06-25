@@ -90,6 +90,10 @@ pub fn run(cli: Cli) -> Result<(), String> {
     );
 
     let before_head = git::current_head(&root)?;
+    confirm_release_step(
+        &format!("Modify release files for {target_version}?"),
+        cli.yes,
+    )?;
     let release_files = write_release_files(
         &packages,
         &cargo_manifest_files,
@@ -98,6 +102,12 @@ pub fn run(cli: Cli) -> Result<(), String> {
         &target_version,
         &changelog_entry,
     )?;
+    if let Err(error) = confirm_release_step(
+        &format!("Commit release files with \"{commit_message}\"?"),
+        cli.yes,
+    ) {
+        return Err(rollback_commit_failure(&root, &release_files, error));
+    }
     if let Err(error) = git_add_release_files(&root, &release_files.changed_paths) {
         return Err(rollback_add_failure(&root, &release_files, error));
     }
@@ -105,7 +115,7 @@ pub fn run(cli: Cli) -> Result<(), String> {
         return Err(rollback_commit_failure(&root, &release_files, error));
     }
     let release_head = git::current_head(&root)?;
-    if let Err(error) = git::git(&root, &["tag", &tag_name]) {
+    if let Err(error) = confirm_release_step(&format!("Create tag {tag_name}?"), cli.yes) {
         return Err(rollback_tag_failure(
             &root,
             &release_files,
@@ -114,6 +124,16 @@ pub fn run(cli: Cli) -> Result<(), String> {
             error,
         ));
     }
+    if let Err(error) = git::git(&root, &["tag", "-a", &tag_name, "-m", &tag_name]) {
+        return Err(rollback_tag_failure(
+            &root,
+            &release_files,
+            &before_head,
+            &release_head,
+            error,
+        ));
+    }
+    confirm_release_step("Push release commit and tag?", cli.yes)?;
     git::git(&root, &["push", "--follow-tags"]).map_err(|error| {
         format!(
             "{error}\nLocal release commit and tag were created. Fix the remote problem and rerun: git push --follow-tags"
@@ -220,6 +240,19 @@ fn prerelease_channel_label(channel: PrereleaseChannel) -> &'static str {
     }
 }
 
+fn confirm_release_step(question: &str, assume_yes: bool) -> Result<(), String> {
+    if assume_yes {
+        return Ok(());
+    }
+
+    let answer = read_prompt(&format!("{question} [y/N] "))?;
+    if matches!(answer.as_str(), "y" | "Y" | "yes" | "YES" | "Yes") {
+        Ok(())
+    } else {
+        Err("release aborted".to_string())
+    }
+}
+
 fn read_prompt(prompt: &str) -> Result<String, String> {
     print!("{prompt}");
     io::stdout()
@@ -231,7 +264,7 @@ fn read_prompt(prompt: &str) -> Result<String, String> {
         .read_line(&mut input)
         .map_err(|error| format!("failed to read prompt input: {error}"))?;
     if bytes == 0 {
-        return Err("interactive version selection requires input".to_string());
+        return Err("interactive prompt requires input".to_string());
     }
 
     Ok(input.trim().to_string())

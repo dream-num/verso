@@ -30,7 +30,7 @@ pub struct Cli {
     )]
     pub config: String,
 
-    #[arg(long, help = "Skip the final confirmation prompt")]
+    #[arg(long, help = "Skip release confirmation prompts")]
     pub yes: bool,
 
     #[arg(
@@ -63,6 +63,7 @@ mod tests {
         assert!(help.contains("--dry-run"));
         assert!(help.contains("--version <SEMVER>"));
         assert!(help.contains("verso.toml"));
+        assert!(help.contains("Skip release confirmation prompts"));
         assert!(help.contains("-V, --tool-version"));
     }
 

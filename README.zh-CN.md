@@ -102,17 +102,17 @@ pnpm release -- --help
 | `--dry-run` | `false` | 预览发布过程，不写文件，也不执行会修改状态的 git 命令。 |
 | `--version <SEMVER>` | 无 | 使用指定目标版本，跳过版本选择。 |
 | `--config <PATH>` | `verso.toml` | 读取其他配置文件。 |
-| `--yes` | `false` | 跳过最终确认。它不会替你选择版本。 |
+| `--yes` | `false` | 跳过发布确认。它不会替你选择版本。 |
 | `-V, --tool-version` | 无 | 打印 Verso CLI 版本。 |
 | `--help` | 无 | 打印帮助信息。 |
 
 不传 `--version` 时，Verso 会交互式选择 patch、minor、major、alpha、beta、rc 或自定义 semver。`--version` 可以传精确版本，包括 `0.26.0-alpha.0`、`0.26.0-beta.1`、`0.26.0-rc.2` 这类 prerelease。
 
-`--yes` 只跳过确认，不会替你选择目标版本。没有 `--version` 时仍然会进入交互式版本选择。`-V` 和 `--tool-version` 会在读取发布配置前直接输出 CLI 版本，适合排查安装问题。
+`--yes` 会跳过发布确认，包括目标版本不大于当前版本时的确认。它不会替你选择目标版本；没有 `--version` 时仍然会进入交互式版本选择。`-V` 和 `--tool-version` 会在读取发布配置前直接输出 CLI 版本，适合排查安装问题。
 
 ## 发布时会发生什么
 
-Verso 会读取配置，发现匹配的 `package.json`，在启用一致性检查时确认版本一致，然后解析目标版本，更新 package 文件、配置的 Cargo manifest 以及对应最近的 `Cargo.lock`，再把 `CHANGELOG.md` 追加到顶部，最后提交、打 tag、推送。
+Verso 会读取配置，发现匹配的 `package.json`，在启用一致性检查时确认版本一致，然后解析目标版本。实际发布时，它会在更新 release 文件、提交、打 tag、推送前分别请求确认；传入 `--yes` 时这些确认会被跳过。更新 release 文件会修改 package 文件、配置的 Cargo manifest 以及对应最近的 `Cargo.lock`，并把 `CHANGELOG.md` 追加到顶部。
 
 Dry run 不会写文件，也不会执行会修改状态的 git 命令。它会打印当前版本、目标版本、警告、changelog 路径、计划执行的 git 命令，以及将被更新的版本文件树。
 

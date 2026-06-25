@@ -68,7 +68,11 @@ pub fn render_dry_run(root: &Path, plan: &ReleasePlan) -> String {
         "git commit -m {}\n",
         shell_quote(&plan.commit_message)
     ));
-    output.push_str(&format!("git tag {}\n", shell_quote(&plan.tag_name)));
+    output.push_str(&format!(
+        "git tag -a {} -m {}\n",
+        shell_quote(&plan.tag_name),
+        shell_quote(&plan.tag_name)
+    ));
     output.push_str("git push --follow-tags\n");
 
     output
