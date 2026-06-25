@@ -1,0 +1,73 @@
+name: Feature Request
+description: Propose a release-workflow improvement.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Verso intentionally keeps a narrow release surface. Please describe the workflow problem first, then the feature.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Workflow problem
+      description: What release task is hard, unsafe, or too manual today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should Verso do differently?
+    validations:
+      required: true
+  - type: textarea
+    id: scope-fit
+    attributes:
+      label: Scope fit
+      description: Explain why this belongs in Verso's focused release workflow surface instead of a project-local script or a broader release tool.
+      placeholder: This keeps release-it parity for... / This removes a manual release step...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing tools, scripts, or manual steps you tried.
+    validations:
+      required: false
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration shape
+      description: If this needs config, sketch the `verso.toml` shape you expect.
+      render: toml
+    validations:
+      required: false
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and migration
+      description: Describe whether this changes existing verso.toml files, package versions, changelog output, git commands, tags, or release-it parity.
+      placeholder: Existing verso.toml files keep working; release-it parity is preserved for...
+    validations:
+      required: true
+  - type: textarea
+    id: dry-run-rollback
+    attributes:
+      label: Dry-run and rollback expectations
+      description: What should dry run print, and what should happen if a release step fails after this feature writes files?
+    validations:
+      required: false
+  - type: textarea
+    id: success
+    attributes:
+      label: Success criteria
+      description: List the behavior, docs, and tests that would make this feature ready to merge.
+      placeholder: |
+        - dry run shows...
+        - release flow test covers...
+        - README documents...
+    validations:
+      required: true

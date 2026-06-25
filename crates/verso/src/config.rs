@@ -1,5 +1,9 @@
 use serde::Deserialize;
-use std::{fs, path::Path};
+use std::{
+    fs,
+    io::ErrorKind,
+    path::{Component, Path},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -14,6 +18,7 @@ pub struct Config {
 pub struct VersionConfig {
     pub root_package: String,
     pub require_consistent_versions: bool,
+    pub cargo_manifest_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +61,7 @@ struct RawConfig {
 struct RawVersionConfig {
     root_package: Option<String>,
     require_consistent_versions: Option<bool>,
+    cargo_manifest_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,18 +94,31 @@ struct RawGithubReleaseConfig {
 }
 
 pub fn load_config(path: &Path) -> Result<Config, String> {
-    let contents = fs::read_to_string(path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    parse_config(&contents)
+    let contents = fs::read_to_string(path).map_err(|error| {
+        if error.kind() == ErrorKind::NotFound {
+            format!(
+                "failed to read {}: {error}\nCreate a verso.toml with:\n\n[workspaces]\npatterns = [\"packages/*\"]\n\nOr pass a different config path with --config <PATH>.",
+                path.display()
+            )
+        } else {
+            format!("failed to read {}: {error}", path.display())
+        }
+    })?;
+    parse_config_with_label(&contents, &path.display().to_string())
 }
 
 pub fn parse_config(contents: &str) -> Result<Config, String> {
+    parse_config_with_label(contents, "verso.toml")
+}
+
+fn parse_config_with_label(contents: &str, label: &str) -> Result<Config, String> {
     let raw: RawConfig =
-        toml::from_str(contents).map_err(|error| format!("failed to parse verso.toml: {error}"))?;
+        toml::from_str(contents).map_err(|error| format!("failed to parse {label}: {error}"))?;
 
     let version = raw.version.unwrap_or(RawVersionConfig {
         root_package: None,
         require_consistent_versions: None,
+        cargo_manifest_paths: None,
     });
     let changelog = raw.changelog.unwrap_or(RawChangelogConfig {
         infile: None,
@@ -121,6 +140,7 @@ pub fn parse_config(contents: &str) -> Result<Config, String> {
                 .root_package
                 .unwrap_or_else(|| "package.json".to_string()),
             require_consistent_versions: version.require_consistent_versions.unwrap_or(true),
+            cargo_manifest_paths: version.cargo_manifest_paths.unwrap_or_default(),
         },
         workspaces: WorkspaceConfig {
             patterns: raw.workspaces.patterns,
@@ -153,6 +173,27 @@ fn validate_config(config: &Config) -> Result<(), String> {
     if config.workspaces.patterns.is_empty() {
         return Err("workspaces.patterns must contain at least one pattern".to_string());
     }
+    if config.version.root_package.trim().is_empty() {
+        return Err("version.root_package must not be empty".to_string());
+    }
+    if config.changelog.infile.trim().is_empty() {
+        return Err("changelog.infile must not be empty".to_string());
+    }
+    if config.git.commit_message.trim().is_empty() {
+        return Err("git.commit_message must not be empty".to_string());
+    }
+    if config.git.tag_name.trim().is_empty() {
+        return Err("git.tag_name must not be empty".to_string());
+    }
+    if !config.git.tag_name.contains("${version}") {
+        return Err("git.tag_name must contain ${version}".to_string());
+    }
+    let example_tag_name = render_template(&config.git.tag_name, "1.2.3");
+    if !is_valid_git_tag_name(&example_tag_name) {
+        return Err(format!(
+            "git.tag_name must render a valid Git tag; example rendered tag {example_tag_name:?} is invalid"
+        ));
+    }
     if config
         .workspaces
         .patterns
@@ -161,6 +202,22 @@ fn validate_config(config: &Config) -> Result<(), String> {
     {
         return Err("workspaces.patterns must not contain empty patterns".to_string());
     }
+    for pattern in &config.workspaces.patterns {
+        validate_config_relative_path("workspaces.patterns", pattern)?;
+    }
+    validate_config_relative_path("version.root_package", &config.version.root_package)?;
+    if config
+        .version
+        .cargo_manifest_paths
+        .iter()
+        .any(|path| path.trim().is_empty())
+    {
+        return Err("version.cargo_manifest_paths must not contain empty paths".to_string());
+    }
+    for path in &config.version.cargo_manifest_paths {
+        validate_config_relative_path("version.cargo_manifest_paths", path)?;
+    }
+    validate_config_relative_path("changelog.infile", &config.changelog.infile)?;
     if config.changelog.preset != "angular" {
         return Err("only changelog preset \"angular\" is supported".to_string());
     }
@@ -171,6 +228,66 @@ fn validate_config(config: &Config) -> Result<(), String> {
         return Err("github_release.enabled = true is not supported in this version".to_string());
     }
     Ok(())
+}
+
+fn validate_config_relative_path(key: &str, value: &str) -> Result<(), String> {
+    if uses_platform_specific_path_syntax(value) {
+        return Err(format!("{key} must use forward slashes in config paths"));
+    }
+
+    if escapes_config_directory(value) {
+        return Err(format!(
+            "{key} must be relative to the config directory and must not contain parent directory segments"
+        ));
+    }
+    Ok(())
+}
+
+fn uses_platform_specific_path_syntax(value: &str) -> bool {
+    value.contains('\\') || has_windows_drive_prefix(value)
+}
+
+fn has_windows_drive_prefix(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    matches!(bytes, [letter, b':', ..] if letter.is_ascii_alphabetic())
+}
+
+fn escapes_config_directory(value: &str) -> bool {
+    value.starts_with('/')
+        || value.starts_with('\\')
+        || Path::new(value).components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+}
+
+fn is_valid_git_tag_name(tag: &str) -> bool {
+    if tag.is_empty()
+        || tag == "@"
+        || tag.starts_with('-')
+        || tag.starts_with('/')
+        || tag.ends_with('/')
+        || tag.ends_with('.')
+        || tag.contains("//")
+        || tag.contains("..")
+        || tag.contains("@{")
+    {
+        return false;
+    }
+
+    if tag.bytes().any(|byte| {
+        byte <= b' '
+            || byte == 0x7f
+            || matches!(byte, b'~' | b'^' | b':' | b'?' | b'*' | b'[' | b'\\')
+    }) {
+        return false;
+    }
+
+    tag.split('/').all(|component| {
+        !component.is_empty() && !component.starts_with('.') && !component.ends_with(".lock")
+    })
 }
 
 pub fn render_template(template: &str, version: &str) -> String {
@@ -192,6 +309,7 @@ mod tests {
 
         assert_eq!(config.version.root_package, "package.json");
         assert!(config.version.require_consistent_versions);
+        assert!(config.version.cargo_manifest_paths.is_empty());
         assert_eq!(config.workspaces.patterns, vec!["packages/*"]);
         assert!(config.workspaces.include_root);
         assert_eq!(config.changelog.infile, "CHANGELOG.md");
@@ -225,6 +343,33 @@ mod tests {
     }
 
     #[test]
+    fn missing_config_error_includes_setup_hint() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let config_path = temp.path().join("missing/verso.toml");
+        let error = load_config(&config_path).expect_err("missing config should fail");
+
+        assert!(error.contains("failed to read"));
+        assert!(error.contains("Create a verso.toml"));
+        assert!(error.contains("[workspaces]"));
+        assert!(error.contains("patterns = [\"packages/*\"]"));
+        assert!(error.contains("--config <PATH>"));
+    }
+
+    #[test]
+    fn load_config_parse_error_mentions_requested_path() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let config_path = temp.path().join("custom.toml");
+        fs::write(&config_path, "[workspaces]\npatterns = [\n")
+            .expect("invalid config should be written");
+
+        let error = load_config(&config_path).expect_err("invalid config should fail");
+
+        assert!(error.contains("failed to parse"));
+        assert!(error.contains("custom.toml"));
+        assert!(!error.contains("failed to parse verso.toml"));
+    }
+
+    #[test]
     fn rejects_empty_workspace_patterns_array() {
         let error = parse_config(
             r#"
@@ -250,6 +395,245 @@ mod tests {
                 parse_config(&contents).expect_err("blank workspace pattern should be rejected");
 
             assert!(error.contains("workspaces.patterns"));
+        }
+    }
+
+    #[test]
+    fn parses_cargo_manifest_version_paths() -> Result<(), String> {
+        let config = parse_config(
+            r#"
+            [version]
+            cargo_manifest_paths = ["crates/verso/Cargo.toml"]
+
+            [workspaces]
+            patterns = ["packages/*"]
+            "#,
+        )?;
+
+        assert_eq!(
+            config.version.cargo_manifest_paths,
+            vec!["crates/verso/Cargo.toml"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_blank_cargo_manifest_paths() {
+        let error = parse_config(
+            r#"
+            [version]
+            cargo_manifest_paths = [" "]
+
+            [workspaces]
+            patterns = ["packages/*"]
+            "#,
+        )
+        .expect_err("blank manifest path should be rejected");
+
+        assert!(error.contains("version.cargo_manifest_paths"));
+    }
+
+    #[test]
+    fn rejects_paths_that_escape_the_config_directory() {
+        let cases = [
+            (
+                "workspaces.patterns",
+                r#"
+                [workspaces]
+                patterns = ["../packages/*"]
+                "#,
+            ),
+            (
+                "workspaces.patterns",
+                r#"
+                [workspaces]
+                patterns = ["/tmp/packages/*"]
+                "#,
+            ),
+            (
+                "version.root_package",
+                r#"
+                [version]
+                root_package = "../package.json"
+
+                [workspaces]
+                patterns = ["packages/*"]
+                "#,
+            ),
+            (
+                "version.cargo_manifest_paths",
+                r#"
+                [version]
+                cargo_manifest_paths = ["../Cargo.toml"]
+
+                [workspaces]
+                patterns = ["packages/*"]
+                "#,
+            ),
+            (
+                "changelog.infile",
+                r#"
+                [workspaces]
+                patterns = ["packages/*"]
+
+                [changelog]
+                infile = "../CHANGELOG.md"
+                "#,
+            ),
+        ];
+
+        for (key, contents) in cases {
+            let error = parse_config(contents).expect_err("escaping paths should be rejected");
+
+            assert!(error.contains(key), "{key} error should mention the key");
+            assert!(
+                error.contains("config directory"),
+                "{key} error should explain paths stay under the config directory"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_platform_specific_path_syntax() {
+        let cases = [
+            (
+                "workspaces.patterns",
+                r#"
+                [workspaces]
+                patterns = ["packages\\*"]
+                "#,
+            ),
+            (
+                "version.root_package",
+                r#"
+                [version]
+                root_package = "C:\\repo\\package.json"
+
+                [workspaces]
+                patterns = ["packages/*"]
+                "#,
+            ),
+            (
+                "changelog.infile",
+                r#"
+                [workspaces]
+                patterns = ["packages/*"]
+
+                [changelog]
+                infile = "docs\\CHANGELOG.md"
+                "#,
+            ),
+        ];
+
+        for (key, contents) in cases {
+            let error =
+                parse_config(contents).expect_err("platform-specific paths should be rejected");
+
+            assert!(error.contains(key), "{key} error should mention the key");
+            assert!(
+                error.contains("forward slashes"),
+                "{key} error should explain that config paths use forward slashes"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_blank_string_config_values() {
+        let cases = [
+            (
+                "version.root_package",
+                r#"
+                [version]
+                root_package = " "
+                "#,
+            ),
+            (
+                "changelog.infile",
+                r#"
+                [changelog]
+                infile = ""
+                "#,
+            ),
+            (
+                "git.commit_message",
+                r#"
+                [git]
+                commit_message = " "
+                "#,
+            ),
+            (
+                "git.tag_name",
+                r#"
+                [git]
+                tag_name = ""
+                "#,
+            ),
+        ];
+
+        for (key, snippet) in cases {
+            let contents = format!(
+                r#"
+                [workspaces]
+                patterns = ["packages/*"]
+
+                {snippet}
+                "#
+            );
+
+            let error =
+                parse_config(&contents).expect_err(&format!("{key} should reject blank values"));
+
+            assert!(error.contains(key), "{key} error should mention the key");
+            assert!(
+                error.contains("must not be empty"),
+                "{key} error should explain the value cannot be empty"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_tag_name_without_version_placeholder() {
+        let error = parse_config(
+            r#"
+            [workspaces]
+            patterns = ["packages/*"]
+
+            [git]
+            tag_name = "release"
+            "#,
+        )
+        .expect_err("tag templates without a version should be rejected");
+
+        assert!(error.contains("git.tag_name"));
+        assert!(error.contains("${version}"));
+    }
+
+    #[test]
+    fn rejects_tag_name_templates_that_render_invalid_git_refs() {
+        for tag_name in [
+            "bad tag ${version}",
+            "release..${version}",
+            "release/${version}.lock",
+            "release@{${version}",
+        ] {
+            let contents = format!(
+                r#"
+                [workspaces]
+                patterns = ["packages/*"]
+
+                [git]
+                tag_name = {tag_name:?}
+                "#
+            );
+            let error =
+                parse_config(&contents).expect_err("invalid git tag templates should be rejected");
+
+            assert!(error.contains("git.tag_name"));
+            assert!(error.contains("valid Git tag"));
+            assert!(
+                error.contains("1.2.3"),
+                "error should include the rendered sample tag"
+            );
         }
     }
 

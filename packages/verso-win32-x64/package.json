@@ -21,5 +21,9 @@
   ],
   "files": [
     "bin/verso.exe"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

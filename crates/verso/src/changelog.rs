@@ -136,10 +136,10 @@ pub fn render_changelog_entry(
 
     if let (Some(previous_tag), Some(repo_slug)) = (previous_tag, repo_slug) {
         output.push_str(&format!(
-            "# [{version}](https://github.com/{repo_slug}/compare/{previous_tag}...{tag}) ({date})\n\n"
+            "## [{version}](https://github.com/{repo_slug}/compare/{previous_tag}...{tag}) ({date})\n\n"
         ));
     } else {
-        output.push_str(&format!("# {version} ({date})\n\n"));
+        output.push_str(&format!("## {version} ({date})\n\n"));
     }
 
     let mut rendered_any = false;
@@ -335,7 +335,7 @@ mod tests {
 
         assert!(
             Regex::new(
-                r"(?m)^# \[0\.25\.0\]\(https://github\.com/dream-num/univer-pro/compare/v0\.24\.0\.\.\.v0\.25\.0\) \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$"
+                r"(?m)^## \[0\.25\.0\]\(https://github\.com/dream-num/univer-pro/compare/v0\.24\.0\.\.\.v0\.25\.0\) \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$"
             )
             .expect("date heading regex should compile")
             .is_match(&rendered)
@@ -373,7 +373,7 @@ mod tests {
             render_changelog_entry("2.0.0", None, "v2.0.0", &commits, Some("owner/repo"));
 
         assert!(
-            Regex::new(r"(?m)^# 2\.0\.0 \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$")
+            Regex::new(r"(?m)^## 2\.0\.0 \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$")
                 .expect("date heading regex should compile")
                 .is_match(&rendered)
         );
@@ -386,7 +386,7 @@ mod tests {
         let rendered = render_changelog_entry("1.2.3", None, "v1.2.3", &[], None);
 
         assert!(
-            Regex::new(r"(?m)^# 1\.2\.3 \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$")
+            Regex::new(r"(?m)^## 1\.2\.3 \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$")
                 .expect("date heading regex should compile")
                 .is_match(&rendered)
         );

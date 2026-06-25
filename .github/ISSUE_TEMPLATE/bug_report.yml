@@ -1,0 +1,103 @@
+name: Bug Report
+description: Report a reproducible Verso problem.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. A small reproduction is the fastest path to a fix.
+        Do not include tokens, private registry credentials, or unpublished security details. Use the security report link for suspected vulnerabilities.
+  - type: input
+    id: version
+    attributes:
+      label: Verso version
+      description: Check your package manager lockfile, package manager output, or `pnpm release -- -V`.
+      placeholder: 1.0.0-alpha.1
+    validations:
+      required: true
+  - type: dropdown
+    id: package-manager
+    attributes:
+      label: Package manager
+      options:
+        - pnpm
+        - npm
+        - yarn
+        - bun
+        - other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, architecture, Node.js version, and Rust version when relevant.
+      placeholder: macOS 15 arm64, Node.js 24, pnpm 10
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: Paste the exact command you ran.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: verso.toml
+      description: Paste the smallest relevant `verso.toml`. Remove private paths or package names if needed.
+      render: toml
+    validations:
+      required: false
+  - type: textarea
+    id: workspace-shape
+    attributes:
+      label: Workspace shape
+      description: List the relevant package paths and version files, or paste the dry-run tree when available.
+      placeholder: |
+        package.json
+        packages/foo/package.json
+        packages/bar/package.json
+    validations:
+      required: false
+  - type: textarea
+    id: dry-run
+    attributes:
+      label: Dry-run output
+      description: Paste `pnpm release -- --dry-run` output when the command reaches planning.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: lockfile-optional-deps
+    attributes:
+      label: Lockfile and optional dependencies
+      description: For install or binary launch issues, mention whether optional dependencies are enabled and whether the lockfile was generated on another OS or CPU.
+      placeholder: pnpm lockfile generated on macOS arm64; optional dependencies enabled
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the full error message or relevant output.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Link to a small repository or describe the smallest workspace shape that triggers the problem.
+    validations:
+      required: false

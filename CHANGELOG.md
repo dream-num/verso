@@ -1,6 +1,6 @@
 # Changelog
 
-# 1.0.0-alpha.0 (2026-06-24)
+## 1.0.0-alpha.0 (2026-06-24)
 
 ### Features
 

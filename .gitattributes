@@ -1,0 +1,26 @@
+* text=auto eol=lf
+
+*.rs text eol=lf
+*.ts text eol=lf
+*.mts text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.lock text eol=lf
+
+*.tgz binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.dylib binary
+*.so binary
+
+/docs/superpowers/** export-ignore
+/artifacts/** export-ignore
+/node_modules/** export-ignore
+/target/** export-ignore
+/packages/*/bin/** export-ignore
+/packages/*/dist/** export-ignore
+/packages/*/test-dist/** export-ignore

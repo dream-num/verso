@@ -349,6 +349,7 @@ mod tests {
             version: VersionConfig {
                 root_package: "package.json".to_owned(),
                 require_consistent_versions: true,
+                cargo_manifest_paths: Vec::new(),
             },
             workspaces: WorkspaceConfig {
                 patterns: patterns.into_iter().map(ToOwned::to_owned).collect(),

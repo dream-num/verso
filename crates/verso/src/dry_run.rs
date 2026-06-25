@@ -9,6 +9,7 @@ pub struct ReleasePlan {
     pub current_version: Version,
     pub target_version: Version,
     pub package_files: Vec<PathBuf>,
+    pub extra_version_files: Vec<PathBuf>,
     pub changelog_file: PathBuf,
     pub commit_message: String,
     pub tag_name: String,
@@ -18,11 +19,25 @@ pub struct ReleasePlan {
 pub fn render_dry_run(root: &Path, plan: &ReleasePlan) -> String {
     let mut output = String::new();
     let package_files = normalized_files(&plan.package_files);
+    let extra_version_files = normalized_files(&plan.extra_version_files);
+    let version_files = normalized_files(
+        &package_files
+            .iter()
+            .chain(extra_version_files.iter())
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
 
     output.push_str("Verso dry run\n\n");
     output.push_str(&format!("Current version: {}\n", plan.current_version));
     output.push_str(&format!("Target version: {}\n", plan.target_version));
     output.push_str(&format!("Package count: {}\n", package_files.len()));
+    if !extra_version_files.is_empty() {
+        output.push_str(&format!(
+            "Extra version file count: {}\n",
+            extra_version_files.len()
+        ));
+    }
 
     if !plan.warnings.is_empty() {
         output.push_str("\nWarnings:\n");
@@ -32,12 +47,12 @@ pub fn render_dry_run(root: &Path, plan: &ReleasePlan) -> String {
     }
 
     output.push_str("\nVersion updates:\n");
-    output.push_str(&render_tree(root, &package_files));
+    output.push_str(&render_tree(root, &version_files));
 
     let changelog = relative_path(root, &plan.changelog_file);
     output.push_str(&format!("\nChangelog: {}\n", changelog.display()));
 
-    let mut git_add_files = package_files;
+    let mut git_add_files = version_files;
     git_add_files.push(plan.changelog_file.clone());
     git_add_files.sort();
     git_add_files.dedup();
@@ -240,6 +255,26 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn dry_run_includes_extra_version_files_in_tree_and_git_add() -> Result<(), String> {
+        let root = TempDir::new().map_err(|error| error.to_string())?;
+        let mut plan = test_plan(
+            root.path(),
+            vec![root.path().join("packages/verso/package.json")],
+            Vec::new(),
+        )?;
+        plan.extra_version_files = vec![root.path().join("crates/verso/Cargo.toml")];
+
+        let output = render_dry_run(root.path(), &plan);
+
+        assert!(output.contains("Package count: 1\nExtra version file count: 1\n"));
+        assert!(output.contains("crates\n│   └── verso\n│       └── Cargo.toml"));
+        assert!(output.contains(
+            "git add 'crates/verso/Cargo.toml' 'docs/CHANGELOG.md' 'packages/verso/package.json'\n"
+        ));
+        Ok(())
+    }
+
     fn test_plan(
         root: &Path,
         package_files: Vec<PathBuf>,
@@ -249,6 +284,7 @@ mod tests {
             current_version: Version::parse("1.2.3").map_err(|error| error.to_string())?,
             target_version: Version::parse("1.3.0").map_err(|error| error.to_string())?,
             package_files,
+            extra_version_files: Vec::new(),
             changelog_file: root.join("docs/CHANGELOG.md"),
             commit_message: "chore(release): release v1.3.0".to_owned(),
             tag_name: "v1.3.0".to_owned(),

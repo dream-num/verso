@@ -1,4 +1,5 @@
 use crate::{
+    cargo_manifest,
     changelog::{self, render_changelog_entry},
     cli::Cli,
     config::{self, render_template},
@@ -20,6 +21,12 @@ pub fn run(cli: Cli) -> Result<(), String> {
     let root = release_root(&config_path)?;
     let config = config::load_config(&config_path)?;
     let packages = discover_packages(&root, &config)?;
+    let cargo_manifest_files = config
+        .version
+        .cargo_manifest_paths
+        .iter()
+        .map(|path| root.join(path))
+        .collect::<Vec<_>>();
 
     if config.version.require_consistent_versions {
         verify_consistent_versions(&packages)?;
@@ -27,6 +34,10 @@ pub fn run(cli: Cli) -> Result<(), String> {
 
     let current_version =
         current_version(&root, Path::new(&config.version.root_package), &packages)?;
+    if config.version.require_consistent_versions {
+        verify_cargo_manifest_versions(&root, &cargo_manifest_files, &current_version)?;
+    }
+
     let target_version =
         resolve_target_version(cli.target_version.as_deref(), &current_version, cli.yes)?;
     let tag_name = render_template(&config.git.tag_name, &target_version.to_string());
@@ -36,6 +47,12 @@ pub fn run(cli: Cli) -> Result<(), String> {
         .iter()
         .map(|package| package.package_json.clone())
         .collect::<Vec<_>>();
+    let cargo_lock_files = cargo_lock_files_for_manifests(&root, &cargo_manifest_files);
+    let extra_version_files = cargo_manifest_files
+        .iter()
+        .chain(cargo_lock_files.iter())
+        .cloned()
+        .collect::<Vec<_>>();
 
     if cli.dry_run {
         let warnings = dry_run_warnings(&root, &tag_name)?;
@@ -43,6 +60,7 @@ pub fn run(cli: Cli) -> Result<(), String> {
             current_version,
             target_version,
             package_files,
+            extra_version_files,
             changelog_file,
             commit_message,
             tag_name,
@@ -53,10 +71,10 @@ pub fn run(cli: Cli) -> Result<(), String> {
     }
 
     if config.git.require_clean_worktree && !git::is_worktree_clean(&root)? {
-        return Err("working tree is dirty".to_string());
+        return Err(dirty_worktree_error());
     }
     if git::tag_exists(&root, &tag_name)? {
-        return Err(format!("tag {tag_name} already exists"));
+        return Err(existing_tag_error(&tag_name));
     }
 
     let previous_tag = previous_tag(&root, &config.git.tag_name)?;
@@ -74,6 +92,8 @@ pub fn run(cli: Cli) -> Result<(), String> {
     let before_head = git::current_head(&root)?;
     let release_files = write_release_files(
         &packages,
+        &cargo_manifest_files,
+        &cargo_lock_files,
         &changelog_file,
         &target_version,
         &changelog_entry,
@@ -257,13 +277,43 @@ fn dry_run_warnings(root: &Path, tag_name: &str) -> Result<Vec<String>, String> 
     let mut warnings = Vec::new();
 
     if !git::is_worktree_clean(root)? {
-        warnings.push("working tree is dirty".to_string());
+        warnings.push(dirty_worktree_warning());
     }
     if git::tag_exists(root, tag_name)? {
-        warnings.push(format!("tag {tag_name} already exists"));
+        warnings.push(existing_tag_warning(tag_name));
     }
 
     Ok(warnings)
+}
+
+fn dirty_worktree_warning() -> String {
+    "working tree is dirty; Commit, stash, or revert local changes before releasing.".to_string()
+}
+
+fn existing_tag_warning(tag_name: &str) -> String {
+    format!(
+        "tag {tag_name} already exists; choose a different version or inspect it with: git show {tag_name}"
+    )
+}
+
+fn dirty_worktree_error() -> String {
+    [
+        "working tree is dirty",
+        "Commit, stash, or revert local changes before releasing.",
+        "Run with --dry-run to preview without requiring a clean worktree.",
+        "If dirty releases are intentional, set git.require_clean_worktree = false in verso.toml.",
+    ]
+    .join("\n")
+}
+
+fn existing_tag_error(tag_name: &str) -> String {
+    [
+        format!("tag {tag_name} already exists"),
+        "Choose a different version, or inspect the existing tag before continuing.".to_string(),
+        format!("Inspect it with: git show {tag_name}"),
+        format!("If it was created by mistake, delete it with: git tag -d {tag_name}"),
+    ]
+    .join("\n")
 }
 
 fn previous_tag(root: &Path, tag_template: &str) -> Result<Option<String>, String> {
@@ -287,6 +337,63 @@ fn previous_tag(root: &Path, tag_template: &str) -> Result<Option<String>, Strin
         .map(|(_version, tag)| tag))
 }
 
+fn verify_cargo_manifest_versions(
+    root: &Path,
+    manifest_files: &[PathBuf],
+    expected: &Version,
+) -> Result<(), String> {
+    let mut mismatches = Vec::new();
+
+    for manifest_path in manifest_files {
+        let contents = fs::read_to_string(manifest_path)
+            .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
+        let package = cargo_manifest::read_package_version(manifest_path, &contents)?;
+        if package.version != *expected {
+            mismatches.push(format!(
+                "{} has version {}",
+                relative_path(root, manifest_path).display(),
+                package.version
+            ));
+        }
+    }
+
+    if mismatches.is_empty() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "inconsistent versions: {}; configured Cargo manifests must match release version {expected}. Set version.require_consistent_versions = false to skip this check.",
+        mismatches.join("; ")
+    ))
+}
+
+fn cargo_lock_files_for_manifests(root: &Path, manifest_files: &[PathBuf]) -> Vec<PathBuf> {
+    let mut lock_files = manifest_files
+        .iter()
+        .filter_map(|manifest_path| cargo_lock_file_for_manifest(root, manifest_path))
+        .collect::<Vec<_>>();
+    lock_files.sort();
+    lock_files.dedup();
+    lock_files
+}
+
+fn cargo_lock_file_for_manifest(root: &Path, manifest_path: &Path) -> Option<PathBuf> {
+    let mut current = manifest_path.parent()?;
+
+    loop {
+        let lock_path = current.join("Cargo.lock");
+        if lock_path.exists() {
+            return Some(lock_path);
+        }
+
+        if current == root {
+            return None;
+        }
+
+        current = current.parent()?;
+    }
+}
+
 struct ReleaseFileChanges {
     changed_paths: Vec<PathBuf>,
     change_set: ChangeSet,
@@ -294,6 +401,8 @@ struct ReleaseFileChanges {
 
 fn write_release_files(
     packages: &[PackageFile],
+    cargo_manifest_files: &[PathBuf],
+    cargo_lock_files: &[PathBuf],
     changelog_file: &Path,
     target_version: &Version,
     changelog_entry: &str,
@@ -302,6 +411,8 @@ fn write_release_files(
         .iter()
         .map(|package| package.package_json.clone())
         .collect::<Vec<_>>();
+    paths.extend(cargo_manifest_files.iter().cloned());
+    paths.extend(cargo_lock_files.iter().cloned());
     paths.push(changelog_file.to_path_buf());
 
     let mut changes = ChangeSet::snapshot(&paths)?;
@@ -316,6 +427,42 @@ fn write_release_files(
             if updated != contents {
                 changes.write(&package.package_json, updated.as_bytes())?;
                 changed_paths.push(package.package_json.clone());
+            }
+        }
+
+        let mut cargo_package_updates = Vec::new();
+        for manifest_path in cargo_manifest_files {
+            let contents = fs::read_to_string(manifest_path)
+                .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
+            let package = cargo_manifest::read_package_version(manifest_path, &contents)?;
+            let updated = cargo_manifest::replace_package_version_preserving_style(
+                manifest_path,
+                &contents,
+                target_version,
+            )?;
+            if updated != contents {
+                changes.write(manifest_path, updated.as_bytes())?;
+                changed_paths.push(manifest_path.clone());
+                cargo_package_updates.push(package);
+            }
+        }
+
+        for lock_path in cargo_lock_files {
+            let contents = fs::read_to_string(lock_path)
+                .map_err(|error| format!("failed to read {}: {error}", lock_path.display()))?;
+            let mut updated = contents.clone();
+            for package in &cargo_package_updates {
+                updated = cargo_manifest::replace_lock_package_version_preserving_style(
+                    lock_path,
+                    &updated,
+                    &package.name,
+                    &package.version,
+                    target_version,
+                )?;
+            }
+            if updated != contents {
+                changes.write(lock_path, updated.as_bytes())?;
+                changed_paths.push(lock_path.clone());
             }
         }
 
@@ -558,6 +705,8 @@ mod tests {
 
         let changed = write_release_files(
             &[root_package.clone(), workspace_package.clone()],
+            &[],
+            &[],
             &changelog,
             &Version::parse("0.2.0").expect("test semver should parse"),
             "# 0.2.0 (2026-06-24)\n\nNo classifiable changes.\n",
@@ -576,12 +725,31 @@ mod tests {
     }
 
     #[test]
-    fn changelog_insertion_normalizes_heading_whitespace() -> Result<(), String> {
-        let updated = insert_changelog_entry("# Changelog   \nold", "# 0.2.0\n\n* feature");
-        let crlf_updated = insert_changelog_entry("# Changelog   \r\nold", "# 0.2.0\n\n* feature");
+    fn cargo_lock_file_search_prefers_nearest_lock_under_release_root() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        let root_lock = temp.path().join("Cargo.lock");
+        let nested_lock = temp.path().join("crates/verso/Cargo.lock");
+        let manifest = temp.path().join("crates/verso/Cargo.toml");
+        fs::create_dir_all(manifest.parent().expect("manifest should have a parent"))
+            .map_err(|error| error.to_string())?;
+        fs::write(&root_lock, "version = 4\n").map_err(|error| error.to_string())?;
+        fs::write(&nested_lock, "version = 4\n").map_err(|error| error.to_string())?;
 
-        assert_eq!(updated, "# Changelog\n\n# 0.2.0\n\n* feature\n\nold");
-        assert_eq!(crlf_updated, "# Changelog\n\n# 0.2.0\n\n* feature\n\nold");
+        assert_eq!(
+            cargo_lock_file_for_manifest(temp.path(), &manifest),
+            Some(nested_lock)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn changelog_insertion_normalizes_heading_whitespace() -> Result<(), String> {
+        let updated = insert_changelog_entry("# Changelog   \nold", "## 0.2.0\n\n* feature");
+        let crlf_updated = insert_changelog_entry("# Changelog   \r\nold", "## 0.2.0\n\n* feature");
+
+        assert_eq!(updated, "# Changelog\n\n## 0.2.0\n\n* feature\n\nold");
+        assert_eq!(crlf_updated, "# Changelog\n\n## 0.2.0\n\n* feature\n\nold");
         Ok(())
     }
 

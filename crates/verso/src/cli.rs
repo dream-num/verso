@@ -32,6 +32,13 @@ pub struct Cli {
 
     #[arg(long, help = "Skip the final confirmation prompt")]
     pub yes: bool,
+
+    #[arg(
+        short = 'V',
+        long = "tool-version",
+        help = "Print the Verso CLI version and exit"
+    )]
+    pub tool_version: bool,
 }
 
 impl Cli {
@@ -56,6 +63,7 @@ mod tests {
         assert!(help.contains("--dry-run"));
         assert!(help.contains("--version <SEMVER>"));
         assert!(help.contains("verso.toml"));
+        assert!(help.contains("-V, --tool-version"));
     }
 
     #[test]
@@ -78,6 +86,24 @@ mod tests {
                 target_version: Some("1.2.3".to_string()),
                 config: "custom.toml".to_string(),
                 yes: true,
+                tool_version: false,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_tool_version_option() {
+        let cli = Cli::try_parse_from(["verso", "--tool-version"])
+            .expect("tool version option should parse");
+
+        assert_eq!(
+            cli,
+            Cli {
+                dry_run: false,
+                target_version: None,
+                config: "verso.toml".to_string(),
+                yes: false,
+                tool_version: true,
             }
         );
     }

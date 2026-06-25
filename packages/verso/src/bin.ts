@@ -1,7 +1,11 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync } from 'node:fs';
 import { createRequire } from 'node:module';
-
+import {
+  ensureExecutable,
+  formatLaunchError,
+  isToolVersionRequest,
+  normalizeCliArgs,
+} from './launcher.js';
 import { type PlatformBinary, resolvePlatformBinary } from './resolve.js';
 
 const require = createRequire(import.meta.url);
@@ -18,32 +22,33 @@ function resolveInstalledBinaryPath({ packageName, binaryName }: PlatformBinary)
   }
 }
 
-function normalizeCliArgs(args: string[]): string[] {
-  return args[0] === '--' ? args.slice(1) : args;
-}
-
-function ensureExecutable(binaryPath: string): void {
-  if (process.platform === 'win32') {
-    return;
+function wrapperVersion(): string {
+  const manifest = require('../package.json') as { version?: unknown };
+  if (typeof manifest.version !== 'string') {
+    throw new Error('Could not read @univerkit/verso package version.');
   }
 
-  chmodSync(binaryPath, 0o755);
+  return manifest.version;
 }
 
 function main(): never {
+  const args = process.argv.slice(2);
+  if (isToolVersionRequest(args)) {
+    console.log(wrapperVersion());
+    process.exit(0);
+  }
+
   const platformBinary = resolvePlatformBinary();
   const binaryPath = resolveInstalledBinaryPath(platformBinary);
 
   ensureExecutable(binaryPath);
 
-  const result = spawnSync(binaryPath, normalizeCliArgs(process.argv.slice(2)), {
+  const result = spawnSync(binaryPath, normalizeCliArgs(args), {
     stdio: 'inherit',
   });
 
   if (result.error !== undefined) {
-    throw new Error(`Failed to launch Verso binary at ${binaryPath}.`, {
-      cause: result.error,
-    });
+    throw new Error(formatLaunchError(binaryPath, result.error));
   }
 
   if (result.signal !== null) {

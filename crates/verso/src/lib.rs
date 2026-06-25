@@ -1,3 +1,4 @@
+pub mod cargo_manifest;
 pub mod changelog;
 pub mod cli;
 pub mod config;

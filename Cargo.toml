@@ -4,10 +4,16 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
+rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/univerkit/verso"
-homepage = "https://github.com/univerkit/verso"
-authors = ["UniverKit contributors"]
+repository = "https://github.com/dream-num/verso"
+homepage = "https://github.com/dream-num/verso"
+authors = ["DreamNum Co., Ltd. <developer@univer.ai>"]
+description = "A focused release CLI for JavaScript workspace packages."
+readme = "README.md"
+keywords = ["release", "changelog", "semver", "workspace", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+publish = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

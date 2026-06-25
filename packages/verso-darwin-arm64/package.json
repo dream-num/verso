@@ -21,5 +21,9 @@
   ],
   "files": [
     "bin/verso"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

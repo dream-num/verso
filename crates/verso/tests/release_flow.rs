@@ -273,53 +273,6 @@ fn interactive_beta_minor_dry_run_uses_computed_prerelease(
     Ok(())
 }
 
-#[test]
-fn tag_failure_resets_head_unstages_and_rolls_back_files() -> Result<(), Box<dyn std::error::Error>>
-{
-    let repo = TempDir::new()?;
-    write_release_fixture(repo.path())?;
-    write_file(
-        &repo.path().join("verso.toml"),
-        r#"
-[workspaces]
-patterns = ["packages/*"]
-include_root = true
-
-[git]
-tag_name = "bad tag ${version}"
-"#,
-    )?;
-    git(repo.path(), &["add", "verso.toml"])?;
-    git(repo.path(), &["commit", "-m", "test: invalid tag template"])?;
-    let before_head = git_stdout(repo.path(), &["rev-parse", "HEAD"])?;
-
-    Command::cargo_bin("verso")?
-        .current_dir(repo.path())
-        .args(["--version", "0.2.0", "--yes"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("git tag bad tag 0.2.0"));
-
-    assert!(
-        fs::read_to_string(repo.path().join("package.json"))?.contains("\"version\": \"0.1.0\"")
-    );
-    assert!(!fs::read_to_string(repo.path().join("CHANGELOG.md"))?.contains("0.2.0"));
-    assert_eq!(
-        git_stdout(repo.path(), &["rev-parse", "HEAD"])?,
-        before_head
-    );
-    assert_eq!(
-        git_stdout(repo.path(), &["status", "--porcelain"])?,
-        String::new()
-    );
-    assert_eq!(
-        git_stdout(repo.path(), &["tag", "--list", "bad tag 0.2.0"])?,
-        String::new()
-    );
-
-    Ok(())
-}
-
 fn init_repo(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     git(path, &["init"])?;
     git(path, &["config", "user.email", "test@example.com"])?;

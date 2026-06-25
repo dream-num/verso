@@ -1,5 +1,6 @@
 [version]
 root_package = "packages/verso/package.json"
+cargo_manifest_paths = ["crates/verso/Cargo.toml"]
 
 [workspaces]
 patterns = ["packages/*"]

@@ -2,13 +2,40 @@ version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
+    target-branch: main
     schedule:
       interval: weekly
+    labels:
+      - dependencies
+      - rust
+    open-pull-requests-limit: 5
+    groups:
+      cargo-dependencies:
+        patterns:
+          - "*"
   - package-ecosystem: github-actions
     directory: /
+    target-branch: main
     schedule:
       interval: weekly
+    labels:
+      - dependencies
+      - github-actions
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
   - package-ecosystem: npm
     directory: /
+    target-branch: main
     schedule:
       interval: weekly
+    labels:
+      - dependencies
+      - npm
+    open-pull-requests-limit: 5
+    groups:
+      npm-dependencies:
+        patterns:
+          - "*"

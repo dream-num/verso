@@ -73,12 +73,14 @@ describe('resolvePlatformBinary', () => {
 });
 
 describe('build output', () => {
-  it('creates the executable bin entrypoint', () => {
+  it('creates the bin entrypoint', () => {
     const binPath = join(process.cwd(), 'bin', 'verso.js');
 
     assert.equal(existsSync(binPath), true);
     assert.equal(readFileSync(binPath, 'utf8').startsWith('#!/usr/bin/env node\n'), true);
-    assert.equal((statSync(binPath).mode & 0o111) !== 0, true);
+    if (process.platform !== 'win32') {
+      assert.equal((statSync(binPath).mode & 0o111) !== 0, true);
+    }
   });
 });
 

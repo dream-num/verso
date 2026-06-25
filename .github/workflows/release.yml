@@ -11,8 +11,30 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  verify-publish-credentials:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify npm publish token
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN secret is required before building release binaries." >&2
+            exit 1
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
   build-binaries:
+    needs: verify-publish-credentials
     strategy:
       fail-fast: false
       matrix:
@@ -38,11 +60,16 @@ jobs:
             package: verso-win32-x64
             binary: verso.exe
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -50,24 +77,48 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2.9.1
 
-      - run: cargo build --release --target ${{ matrix.target }} -p verso
+      - run: cargo build --locked --release --target ${{ matrix.target }} -p verso
+
+      - name: Smoke test built binary
+        shell: bash
+        run: |
+          binary="./target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          "$binary" --help
+          actual_version="$("$binary" --tool-version)"
+          expected_version="${RELEASE_TAG#v}"
+          if [ "$actual_version" != "$expected_version" ]; then
+            echo "Built binary version $actual_version does not match release tag $RELEASE_TAG" >&2
+            exit 1
+          fi
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+      - name: Generate binary provenance attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: target/${{ matrix.target }}/release/${{ matrix.binary }}
 
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.package }}
           path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 7
 
   publish:
-    needs: build-binaries
+    needs:
+      - verify-publish-credentials
+      - build-binaries
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
-      contents: read
+      contents: write
       id-token: write
 
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
 
       - uses: pnpm/action-setup@v6
 
@@ -91,14 +142,83 @@ jobs:
           node scripts/copy-binary-to-platform-package.mts packages/verso-linux-x64 artifacts/verso-linux-x64/verso
           node scripts/copy-binary-to-platform-package.mts packages/verso-win32-x64 artifacts/verso-win32-x64/verso.exe
 
-      - run: node scripts/verify-platform-packages.mts
+      - run: node scripts/write-platform-checksums.mts artifacts/SHA256SUMS.txt
 
-      - run: pnpm --filter @univerkit/verso build
+      - run: cp LICENSE artifacts/LICENSE
 
-      - run: pnpm --filter './packages/verso-*' publish --access public --no-git-checks
+      - name: Write binary archive README
+        run: node scripts/write-binary-archive-readme.mts "$RELEASE_TAG" artifacts/README.md
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: verso-binaries
+          path: |
+            artifacts/LICENSE
+            artifacts/README.md
+            artifacts/SHA256SUMS.txt
+            artifacts/verso-darwin-arm64/verso
+            artifacts/verso-darwin-x64/verso
+            artifacts/verso-linux-arm64/verso
+            artifacts/verso-linux-x64/verso
+            artifacts/verso-win32-x64/verso.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub release assets
+        run: |
+          mkdir -p release-assets
+          cp artifacts/SHA256SUMS.txt release-assets/SHA256SUMS.txt
+          tar -czf release-assets/verso-binaries.tar.gz -C artifacts \
+            LICENSE \
+            README.md \
+            SHA256SUMS.txt \
+            verso-darwin-arm64/verso \
+            verso-darwin-x64/verso \
+            verso-linux-arm64/verso \
+            verso-linux-x64/verso \
+            verso-win32-x64/verso.exe
+          node scripts/write-github-release-notes.mts "$RELEASE_TAG" release-assets/RELEASE_NOTES.md
+          release_create_flags=(--latest)
+          release_edit_flags=(--latest)
+          release_prerelease=false
+          release_make_latest=true
+          case "$RELEASE_TAG" in
+            *-alpha.*|*-beta.*|*-rc.*)
+              release_create_flags=(--prerelease --latest=false)
+              release_edit_flags=(--prerelease)
+              release_prerelease=true
+              release_make_latest=false
+              ;;
+          esac
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file release-assets/RELEASE_NOTES.md "${release_edit_flags[@]}"
+            release_id="$(gh api "repos/{owner}/{repo}/releases/tags/$RELEASE_TAG" --jq '.id')"
+            gh api -X PATCH "repos/{owner}/{repo}/releases/$release_id" \
+              -F "prerelease=$release_prerelease" \
+              -f "make_latest=$release_make_latest" \
+              --silent
+            gh release upload "$RELEASE_TAG" release-assets/verso-binaries.tar.gz release-assets/SHA256SUMS.txt --clobber
+          else
+            gh release create "$RELEASE_TAG" release-assets/verso-binaries.tar.gz release-assets/SHA256SUMS.txt --title "$RELEASE_TAG" --notes-file release-assets/RELEASE_NOTES.md --verify-tag "${release_create_flags[@]}"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+      - name: Publish platform packages
+        run: |
+          node scripts/publish-npm-packages.mts \
+            packages/verso-darwin-arm64 \
+            packages/verso-darwin-x64 \
+            packages/verso-linux-arm64 \
+            packages/verso-linux-x64 \
+            packages/verso-win32-x64
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - run: pnpm --filter @univerkit/verso publish --access public --no-git-checks
+      - name: Publish main package
+        run: node scripts/publish-npm-packages.mts packages/verso
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
