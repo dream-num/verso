@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.0-alpha.2](https://github.com/dream-num/verso/compare/v1.0.0-alpha.1...v1.0.0-alpha.2) (2026-06-25)
+
+### Features
+
+* add step confirmations to release flow ([790124c](https://github.com/dream-num/verso/commit/790124c60a1b3632314276116caf2745d6817fb8))
+
 ## [1.0.0-alpha.1](https://github.com/dream-num/verso/compare/v1.0.0-alpha.0...v1.0.0-alpha.1) (2026-06-25)
 
 ### Other Changes (chore)
