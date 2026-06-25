@@ -1,6 +1,6 @@
 {
   "name": "@univerkit/verso",
-  "version": "1.0.0-alpha.2",
+  "version": "1.0.0-beta.0",
   "description": "A focused release CLI for JavaScript workspace packages.",
   "license": "MIT",
   "author": "DreamNum Co., Ltd. <developer@univer.ai>",

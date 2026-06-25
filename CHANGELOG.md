@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.0-beta.0](https://github.com/dream-num/verso/compare/v1.0.0-alpha.2...v1.0.0-beta.0) (2026-06-25)
+
+### Features
+
+* update release confirmation prompts to default to yes ([5cef40c](https://github.com/dream-num/verso/commit/5cef40cd2e519e7d389620234f03ed176956270a))
+
 ## [1.0.0-alpha.2](https://github.com/dream-num/verso/compare/v1.0.0-alpha.1...v1.0.0-alpha.2) (2026-06-25)
 
 ### Features
