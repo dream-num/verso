@@ -3,11 +3,12 @@ use crate::{
     changelog::{self, render_changelog_entry},
     cli::Cli,
     config::{self, render_template},
-    dry_run::{render_dry_run, PlannedHook, ReleasePlan},
+    doctor,
+    dry_run::{render_dry_run, render_dry_run_json, PlannedHook, ReleasePlan},
     git, package_json,
     rollback::ChangeSet,
     versioning::{bump_prerelease, bump_stable, parse_custom_version, BaseBump, PrereleaseChannel},
-    workspace::{discover_packages, verify_consistent_versions, PackageFile},
+    workspace::PackageFile,
 };
 use semver::Version;
 use std::{
@@ -18,26 +19,18 @@ use std::{
 };
 
 pub fn run(cli: Cli) -> Result<(), String> {
-    let config_path = PathBuf::from(&cli.config);
-    let root = release_root(&config_path)?;
-    let config = config::load_config(&config_path)?;
-    let packages = discover_packages(&root, &config)?;
-    let cargo_manifest_files = config
-        .version
-        .cargo_manifest_paths
-        .iter()
-        .map(|path| root.join(path))
-        .collect::<Vec<_>>();
-
-    if config.version.require_consistent_versions {
-        verify_consistent_versions(&packages)?;
+    if cli.json && !cli.dry_run {
+        return Err("--json can only be used with --dry-run".to_string());
     }
 
-    let current_version =
-        current_version(&root, Path::new(&config.version.root_package), &packages)?;
-    if config.version.require_consistent_versions {
-        verify_cargo_manifest_versions(&root, &cargo_manifest_files, &current_version)?;
-    }
+    let config_path = cli.config_path_buf();
+    let allow_missing_default_config = !cli.config_was_explicit();
+    let inspection = doctor::inspect_project(&config_path, allow_missing_default_config)?;
+    let root = inspection.root;
+    let config = inspection.config;
+    let packages = inspection.packages;
+    let cargo_manifest_files = inspection.cargo_manifest_files;
+    let current_version = inspection.current_version;
 
     let target_version =
         resolve_target_version(cli.target_version.as_deref(), &current_version, cli.yes)?;
@@ -68,7 +61,11 @@ pub fn run(cli: Cli) -> Result<(), String> {
             hooks: planned_hooks(&config.hooks),
             warnings,
         };
-        print!("{}", render_dry_run(&root, &plan));
+        if cli.json {
+            println!("{}", render_dry_run_json(&root, &plan));
+        } else {
+            print!("{}", render_dry_run(&root, &plan));
+        }
         return Ok(());
     }
 
@@ -365,7 +362,7 @@ fn read_prompt(prompt: &str) -> Result<String, String> {
     Ok(input.trim().to_string())
 }
 
-fn release_root(config_path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn release_root(config_path: &Path) -> Result<PathBuf, String> {
     let current_dir =
         std::env::current_dir().map_err(|error| format!("failed to read current dir: {error}"))?;
 
@@ -382,7 +379,7 @@ fn release_root(config_path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn current_version(
+pub(crate) fn current_version(
     root: &Path,
     root_package: &Path,
     packages: &[PackageFile],
@@ -465,7 +462,7 @@ fn previous_tag(root: &Path, tag_template: &str) -> Result<Option<String>, Strin
         .map(|(_version, tag)| tag))
 }
 
-fn verify_cargo_manifest_versions(
+pub(crate) fn verify_cargo_manifest_versions(
     root: &Path,
     manifest_files: &[PathBuf],
     expected: &Version,

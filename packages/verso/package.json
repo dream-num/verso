@@ -59,7 +59,7 @@
     "@univerkit/verso-win32-x64": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.0.1",
     "typescript": "^6.0.3"
   }
 }

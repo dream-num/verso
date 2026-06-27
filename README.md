@@ -31,8 +31,19 @@ Add a release script to your package manifest:
 
 ## Configuration
 
-Create `verso.toml` in the project root. The only required field is
-`workspaces.patterns`.
+Single-package projects can run without `verso.toml`. When the default
+`verso.toml` is missing and `package.json` exists, Verso uses built-in defaults
+and releases the root package.
+
+Create `verso.toml` only when you need to customize behavior. For a
+single-package project, it can be minimal:
+
+```toml
+[version]
+root_package = "package.json"
+```
+
+For a workspace release, configure package globs:
 
 ```toml
 [workspaces]
@@ -57,6 +68,8 @@ cargo_manifest_paths = []
 
 [workspaces]
 include_root = true
+ignore = []
+use_gitignore = true
 
 [changelog]
 infile = "CHANGELOG.md"
@@ -90,10 +103,16 @@ release workflow.
 
 ### Configuration Reference
 
+When `--config` is omitted and `verso.toml` is missing, Verso falls back to the
+built-in single-package defaults only if `package.json` exists. Explicit
+`--config <PATH>` values are always required to exist.
+
 | Key | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `workspaces.patterns` | Yes | None | Package workspace glob patterns relative to the config directory. Use forward slashes. Supports `*`, `**`, `?`, character classes, braces, and `!` exclusions. The array must not be empty. |
+| `workspaces.patterns` | No | `[]` | Package workspace glob patterns relative to the config directory. Use forward slashes. Supports `*`, `**`, `?`, character classes, braces, and `!` exclusions. Omit `[workspaces]` for single-package releases. |
 | `workspaces.include_root` | No | `true` | Include the root package selected by `version.root_package`. |
+| `workspaces.ignore` | No | `[]` | Extra workspace discovery ignore patterns. Plain path segments such as `fixtures` match directories by name. |
+| `workspaces.use_gitignore` | No | `true` | Respect root and nested `.gitignore` files during workspace discovery. |
 | `version.root_package` | No | `package.json` | Package used for the current version and root update. Use forward slashes; must stay under the config directory. |
 | `version.require_consistent_versions` | No | `true` | Fail when discovered packages or configured Cargo manifests do not share one version. |
 | `version.cargo_manifest_paths` | No | `[]` | Cargo manifests under the config directory whose `[package].version` should be updated. Use forward slashes. The nearest `Cargo.lock` is updated when present. |
@@ -120,7 +139,10 @@ pnpm release
 pnpm release -- --dry-run
 pnpm release -- --version 0.26.0
 pnpm release -- --version 0.26.0 --yes
+pnpm release -- --dry-run --json
 pnpm release -- --config path/to/verso.toml
+pnpm release -- doctor
+pnpm release -- init
 pnpm release -- -V
 pnpm release -- --help
 ```
@@ -128,11 +150,19 @@ pnpm release -- --help
 | Option | Default | Description |
 | --- | --- | --- |
 | `--dry-run` | `false` | Preview the release without writing files or running mutating git commands. |
+| `--json` | `false` | Print dry-run output as JSON. Must be used with `--dry-run`. |
 | `--version <SEMVER>` | None | Use an exact target version without interactive selection. |
 | `--config <PATH>` | `verso.toml` | Read a different config file. |
 | `--yes` | `false` | Skip release confirmation prompts. It does not choose a version. |
 | `-V, --tool-version` | None | Print the Verso CLI version. |
 | `--help` | None | Print CLI help. |
+
+Subcommands:
+
+| Command | Description |
+| --- | --- |
+| `verso init` | Create a starter `verso.toml`. It auto-detects `packages/*`; use `--single`, `--workspace`, or `--force` to override behavior. |
+| `verso doctor` | Validate config parsing, package discovery, version consistency, changelog path, and Cargo manifest versions. Use `--json` for structured output. |
 
 Without `--version`, Verso prompts for patch, minor, major, alpha, beta, rc, or
 custom semver. Exact versions can be passed with `--version`, including
@@ -160,6 +190,14 @@ Dry runs do not write files or run mutating git commands. They print the
 current version, target version, warnings, changelog path, planned git commands,
 planned hooks, and a tree of version files that would be updated. Dry runs list
 hooks but do not execute them.
+
+`--dry-run --json` prints the same release plan as structured JSON for scripts
+and CI systems.
+
+Workspace discovery always skips `.git` and `node_modules`. By default it also
+respects root and nested `.gitignore` files, so ignored directories are not
+scanned for release packages. Set `workspaces.use_gitignore = false` if a
+project intentionally publishes packages from ignored directories.
 
 If a local release command fails, Verso makes a best-effort rollback of files it
 modified, unstages release paths, and cleans up local release state where that

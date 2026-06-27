@@ -1,7 +1,7 @@
 # @univerkit/verso
 
-Verso is a focused release CLI for JavaScript workspaces that publish multiple
-packages at the same version. It updates package manifests, writes an
+Verso is a focused release CLI for JavaScript packages and workspaces that
+publish related packages at the same version. It updates package manifests, writes an
 Angular-style changelog, creates a release commit and tag, and pushes with
 `git push --follow-tags`.
 
@@ -38,7 +38,19 @@ Add a release script:
 }
 ```
 
-Create `verso.toml` in the project root:
+Single-package projects can run without `verso.toml`. When the default
+`verso.toml` is missing and `package.json` exists, Verso releases the root
+package with built-in defaults.
+
+Create `verso.toml` only when you need to customize behavior. Single-package
+projects can start with:
+
+```toml
+[version]
+root_package = "package.json"
+```
+
+Workspace projects can add package globs:
 
 ```toml
 [workspaces]
@@ -50,7 +62,10 @@ Then run:
 ```sh
 pnpm release
 pnpm release -- --dry-run
+pnpm release -- --dry-run --json
 pnpm release -- --version 1.2.3 --yes
+pnpm release -- init
+pnpm release -- doctor
 pnpm release -- -V
 ```
 

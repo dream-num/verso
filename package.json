@@ -1,6 +1,7 @@
 {
   "name": "@univerkit/verso-repo",
   "private": true,
+  "version": "1.0.0-beta.0",
   "description": "A focused release CLI for JavaScript workspace packages.",
   "license": "MIT",
   "author": "DreamNum Co., Ltd. <developer@univer.ai>",
@@ -25,7 +26,7 @@
     "release": "cargo run -p verso"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.0.1",
     "typescript": "^6.0.3"
   }
 }

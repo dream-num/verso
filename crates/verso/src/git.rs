@@ -25,12 +25,24 @@ pub fn git(root: &Path, args: &[&str]) -> Result<GitOutput, String> {
             || "terminated by signal".to_string(),
             |code| code.to_string(),
         );
-        Err(format!(
-            "git {} failed with status {status}: {}",
-            args.join(" "),
-            stderr.trim()
-        ))
+        Err(format_git_failure(args, &status, &stdout, &stderr))
     }
+}
+
+fn format_git_failure(args: &[&str], status: &str, stdout: &str, stderr: &str) -> String {
+    let stdout = stdout.trim();
+    let stderr = stderr.trim();
+    let details = match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => "no output".to_string(),
+        (true, false) => stderr.to_string(),
+        (false, true) => stdout.to_string(),
+        (false, false) => format!("stdout:\n{stdout}\nstderr:\n{stderr}"),
+    };
+
+    format!(
+        "git {} failed with status {status}: {details}",
+        args.join(" ")
+    )
 }
 
 pub fn is_worktree_clean(root: &Path) -> Result<bool, String> {
@@ -191,5 +203,26 @@ mod tests {
             Some("git@github.com:owner/repo.git".to_string())
         );
         Ok(())
+    }
+
+    #[test]
+    fn failed_git_output_includes_stdout_and_stderr() {
+        let message = format_git_failure(
+            &["push", "--follow-tags"],
+            "128",
+            "stdout reason",
+            "stderr reason",
+        );
+
+        assert!(message.contains("git push --follow-tags failed with status 128"));
+        assert!(message.contains("stdout reason"));
+        assert!(message.contains("stderr reason"));
+    }
+
+    #[test]
+    fn failed_git_output_uses_stdout_when_stderr_is_empty() {
+        let message = format_git_failure(&["push"], "1", "wsl stdout reason", "");
+
+        assert!(message.contains("wsl stdout reason"));
     }
 }

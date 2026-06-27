@@ -50,6 +50,74 @@ include_root = true
 }
 
 #[test]
+fn single_package_release_uses_defaults_when_config_is_missing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let repo = TempDir::new()?;
+    init_repo(repo.path())?;
+    write_file(
+        &repo.path().join("package.json"),
+        "{\n  \"name\": \"root\",\n  \"version\": \"0.1.0\"\n}\n",
+    )?;
+    git(repo.path(), &["add", "."])?;
+    git(repo.path(), &["commit", "-m", "feat: initial"])?;
+
+    Command::cargo_bin("verso")?
+        .current_dir(repo.path())
+        .args(["--dry-run", "--version", "0.2.0", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Package count: 1"))
+        .stdout(predicate::str::contains("package.json"));
+
+    Ok(())
+}
+
+#[test]
+fn explicit_missing_config_still_fails() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = TempDir::new()?;
+    init_repo(repo.path())?;
+    write_file(
+        &repo.path().join("package.json"),
+        "{\n  \"name\": \"root\",\n  \"version\": \"0.1.0\"\n}\n",
+    )?;
+    git(repo.path(), &["add", "."])?;
+    git(repo.path(), &["commit", "-m", "feat: initial"])?;
+
+    Command::cargo_bin("verso")?
+        .current_dir(repo.path())
+        .args([
+            "--dry-run",
+            "--version",
+            "0.2.0",
+            "--yes",
+            "--config",
+            "missing.toml",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to read"));
+
+    Ok(())
+}
+
+#[test]
+fn json_output_requires_dry_run() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = TempDir::new()?;
+    write_release_fixture(repo.path())?;
+
+    Command::cargo_bin("verso")?
+        .current_dir(repo.path())
+        .args(["--json", "--version", "0.2.0", "--yes"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--json can only be used with --dry-run",
+        ));
+
+    Ok(())
+}
+
+#[test]
 fn release_updates_versions_changelog_commit_and_tag_before_push(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let repo = TempDir::new()?;

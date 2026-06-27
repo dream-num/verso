@@ -1,11 +1,11 @@
 use crate::{
-    config::Config,
+    config::{Config, WorkspaceConfig},
     package_json::{read_package, PackageInfo},
 };
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
+use ignore::WalkBuilder;
 use std::{
     collections::BTreeSet,
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -27,7 +27,7 @@ pub fn discover_packages(root: &Path, config: &Config) -> Result<Vec<PackageFile
     }
 
     for search_root in workspace_search_roots(root, &config.workspaces.patterns) {
-        for dir in collect_dirs(&search_root)? {
+        for dir in collect_dirs(root, &search_root, &config.workspaces)? {
             if !workspace_patterns.is_match(root, &dir) {
                 continue;
             }
@@ -65,7 +65,7 @@ pub fn discover_packages(root: &Path, config: &Config) -> Result<Vec<PackageFile
         ));
     }
 
-    if !matched_workspace_package {
+    if !config.workspaces.patterns.is_empty() && !matched_workspace_package {
         return Err(format!(
             "no workspace package.json files matched configured workspaces under {}",
             root.display()
@@ -165,6 +165,66 @@ fn workspace_search_roots(root: &Path, patterns: &[String]) -> Vec<PathBuf> {
     roots.into_iter().collect()
 }
 
+struct WorkspaceIgnores {
+    names: BTreeSet<String>,
+    patterns: GlobSet,
+}
+
+impl WorkspaceIgnores {
+    fn new(patterns: &[String]) -> Result<Self, String> {
+        let mut names = BTreeSet::new();
+        let mut globs = GlobSetBuilder::new();
+
+        for pattern in patterns {
+            if is_plain_path_segment(pattern) {
+                names.insert(pattern.to_owned());
+            } else {
+                let glob = GlobBuilder::new(pattern)
+                    .literal_separator(true)
+                    .build()
+                    .map_err(|error| {
+                        format!("invalid workspace ignore pattern {pattern:?}: {error}")
+                    })?;
+                globs.add(glob);
+            }
+        }
+
+        Ok(Self {
+            names,
+            patterns: globs
+                .build()
+                .map_err(|error| format!("failed to build workspace ignore patterns: {error}"))?,
+        })
+    }
+
+    fn is_match(&self, root: &Path, dir: &Path) -> bool {
+        if dir
+            .file_name()
+            .is_some_and(|name| name == "node_modules" || name == ".git")
+        {
+            return true;
+        }
+        if dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| self.names.contains(name))
+        {
+            return true;
+        }
+        let Ok(relative) = dir.strip_prefix(root) else {
+            return false;
+        };
+        self.patterns.is_match(relative)
+    }
+}
+
+fn is_plain_path_segment(pattern: &str) -> bool {
+    !pattern.contains('/')
+        && !pattern
+            .chars()
+            .any(|character| matches!(character, '*' | '?' | '[' | '{'))
+}
+
 fn static_pattern_prefix(pattern: &str) -> String {
     let glob_start = pattern
         .char_indices()
@@ -178,34 +238,46 @@ fn static_pattern_prefix(pattern: &str) -> String {
     }
 }
 
-fn collect_dirs(root: &Path) -> Result<Vec<PathBuf>, String> {
-    if !root.exists() {
+fn collect_dirs(
+    root: &Path,
+    search_root: &Path,
+    workspaces: &WorkspaceConfig,
+) -> Result<Vec<PathBuf>, String> {
+    if !search_root.exists() {
         return Ok(Vec::new());
     }
-    if !root.is_dir() {
+    if !search_root.is_dir() {
         return Ok(Vec::new());
     }
 
-    let mut dirs = vec![root.to_path_buf()];
-    let entries = fs::read_dir(root).map_err(|error| {
-        format!(
-            "failed to read workspace directory {}: {error}",
-            root.display()
-        )
-    })?;
-    for entry in entries {
+    let ignores = WorkspaceIgnores::new(&workspaces.ignore)?;
+    let root = root.to_path_buf();
+    let mut builder = WalkBuilder::new(search_root);
+    builder
+        .hidden(false)
+        .parents(workspaces.use_gitignore)
+        .git_ignore(workspaces.use_gitignore)
+        .require_git(false)
+        .git_global(false)
+        .git_exclude(false)
+        .ignore(false);
+
+    let mut dirs = Vec::new();
+    for entry in builder
+        .filter_entry(move |entry| !ignores.is_match(&root, entry.path()))
+        .build()
+    {
         let entry = entry.map_err(|error| {
             format!(
                 "failed to read workspace directory {}: {error}",
-                root.display()
+                search_root.display()
             )
         })?;
-        let path = entry.path();
-        if path.is_dir() {
-            if path.file_name().is_some_and(|name| name == "node_modules") {
-                continue;
-            }
-            dirs.extend(collect_dirs(&path)?);
+        if entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_dir())
+        {
+            dirs.push(entry.path().to_path_buf());
         }
     }
 
@@ -249,6 +321,19 @@ mod tests {
                 &temp.path().join("packages/a"),
             ],
         );
+        verify_consistent_versions(&packages)?;
+        Ok(())
+    }
+
+    #[test]
+    fn discovers_root_package_when_workspace_patterns_are_omitted() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(temp.path(), "root", "1.2.3")?;
+        let config = test_config(Vec::new(), true);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(&packages, &[temp.path()]);
         verify_consistent_versions(&packages)?;
         Ok(())
     }
@@ -352,6 +437,84 @@ mod tests {
             "9.9.9",
         )?;
         let config = test_config(vec!["packages/**"], false);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(&packages, &[&temp.path().join("packages/a")]);
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_discovery_respects_root_gitignore() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        write_package(
+            &temp.path().join("packages/generated"),
+            "generated",
+            "9.9.9",
+        )?;
+        fs::write(temp.path().join(".gitignore"), "packages/generated/\n")
+            .map_err(|error| error.to_string())?;
+        let config = test_config(vec!["packages/**"], false);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(&packages, &[&temp.path().join("packages/a")]);
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_discovery_respects_nested_gitignore() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        write_package(
+            &temp.path().join("packages/a/generated"),
+            "generated",
+            "9.9.9",
+        )?;
+        fs::write(temp.path().join("packages/a/.gitignore"), "generated/\n")
+            .map_err(|error| error.to_string())?;
+        let config = test_config(vec!["packages/**"], false);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(&packages, &[&temp.path().join("packages/a")]);
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_discovery_can_disable_gitignore() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        write_package(
+            &temp.path().join("packages/generated"),
+            "generated",
+            "1.2.3",
+        )?;
+        fs::write(temp.path().join(".gitignore"), "packages/generated/\n")
+            .map_err(|error| error.to_string())?;
+        let mut config = test_config(vec!["packages/**"], false);
+        config.workspaces.use_gitignore = false;
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(
+            &packages,
+            &[
+                &temp.path().join("packages/a"),
+                &temp.path().join("packages/generated"),
+            ],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_discovery_respects_configured_ignore() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        write_package(&temp.path().join("packages/fixtures"), "fixtures", "9.9.9")?;
+        let mut config = test_config(vec!["packages/**"], false);
+        config.workspaces.ignore = vec!["fixtures".to_owned()];
 
         let packages = discover_packages(temp.path(), &config)?;
 
@@ -483,6 +646,8 @@ mod tests {
             workspaces: WorkspaceConfig {
                 patterns: patterns.into_iter().map(ToOwned::to_owned).collect(),
                 include_root,
+                ignore: Vec::new(),
+                use_gitignore: true,
             },
             changelog: ChangelogConfig {
                 infile: "CHANGELOG.md".to_owned(),

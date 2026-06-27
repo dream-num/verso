@@ -1,4 +1,5 @@
 use semver::Version;
+use serde_json::json;
 use std::{
     collections::BTreeMap,
     path::{Component, Path, PathBuf},
@@ -21,6 +22,86 @@ pub struct ReleasePlan {
 pub struct PlannedHook {
     pub name: String,
     pub command: String,
+}
+
+pub fn render_dry_run_json(root: &Path, plan: &ReleasePlan) -> String {
+    let package_files = normalized_files(&plan.package_files);
+    let extra_version_files = normalized_files(&plan.extra_version_files);
+    let version_files = normalized_files(
+        &package_files
+            .iter()
+            .chain(extra_version_files.iter())
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+    let mut git_add_files = version_files.clone();
+    git_add_files.push(plan.changelog_file.clone());
+    git_add_files.sort();
+    git_add_files.dedup();
+
+    let git_add_args = git_add_files
+        .iter()
+        .map(|file| relative_string(root, file))
+        .collect::<Vec<_>>();
+    let mut git_add_command = vec!["git".to_owned(), "add".to_owned()];
+    git_add_command.extend(git_add_args);
+    let git_commands = vec![
+        git_add_command,
+        vec![
+            "git".to_owned(),
+            "commit".to_owned(),
+            "-m".to_owned(),
+            plan.commit_message.clone(),
+        ],
+        vec![
+            "git".to_owned(),
+            "tag".to_owned(),
+            "-a".to_owned(),
+            plan.tag_name.clone(),
+            "-m".to_owned(),
+            plan.tag_name.clone(),
+        ],
+        vec![
+            "git".to_owned(),
+            "push".to_owned(),
+            "--follow-tags".to_owned(),
+        ],
+    ];
+
+    let hooks = plan
+        .hooks
+        .iter()
+        .map(|hook| {
+            json!({
+                "name": hook.name,
+                "command": hook.command,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    serde_json::to_string_pretty(&json!({
+        "currentVersion": plan.current_version.to_string(),
+        "targetVersion": plan.target_version.to_string(),
+        "packageFiles": package_files
+            .iter()
+            .map(|file| relative_string(root, file))
+            .collect::<Vec<_>>(),
+        "extraVersionFiles": extra_version_files
+            .iter()
+            .map(|file| relative_string(root, file))
+            .collect::<Vec<_>>(),
+        "versionFiles": version_files
+            .iter()
+            .map(|file| relative_string(root, file))
+            .collect::<Vec<_>>(),
+        "changelogFile": relative_string(root, &plan.changelog_file),
+        "commitMessage": plan.commit_message,
+        "tagName": plan.tag_name,
+        "hooks": hooks,
+        "warnings": plan.warnings,
+        "gitCommands": git_commands,
+    }))
+    .expect("dry run plan should serialize")
 }
 
 pub fn render_dry_run(root: &Path, plan: &ReleasePlan) -> String {
@@ -153,6 +234,10 @@ fn relative_path(root: &Path, path: &Path) -> PathBuf {
     path.strip_prefix(root)
         .map(Path::to_path_buf)
         .unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn relative_string(root: &Path, path: &Path) -> String {
+    relative_path(root, path).display().to_string()
 }
 
 fn path_labels(path: &Path) -> Vec<String> {
@@ -317,6 +402,37 @@ mod tests {
         assert!(output.contains("Planned hooks:\n"));
         assert!(output.contains("before_version: pnpm test\n"));
         assert!(output.contains("after_version: pnpm build\n"));
+        Ok(())
+    }
+
+    #[test]
+    fn dry_run_json_renders_structured_release_plan() -> Result<(), String> {
+        let root = TempDir::new().map_err(|error| error.to_string())?;
+        let mut plan = test_plan(
+            root.path(),
+            vec![root.path().join("packages/verso/package.json")],
+            vec!["working tree is dirty".to_owned()],
+        )?;
+        plan.extra_version_files = vec![root.path().join("Cargo.lock")];
+        plan.hooks = vec![PlannedHook {
+            name: "before_version".to_owned(),
+            command: "pnpm test".to_owned(),
+        }];
+
+        let json: serde_json::Value =
+            serde_json::from_str(&render_dry_run_json(root.path(), &plan))
+                .map_err(|error| error.to_string())?;
+
+        assert_eq!(json["currentVersion"], "1.2.3");
+        assert_eq!(json["targetVersion"], "1.3.0");
+        assert_eq!(json["packageFiles"][0], "packages/verso/package.json");
+        assert_eq!(json["extraVersionFiles"][0], "Cargo.lock");
+        assert_eq!(json["versionFiles"][0], "Cargo.lock");
+        assert_eq!(json["changelogFile"], "docs/CHANGELOG.md");
+        assert_eq!(json["hooks"][0]["name"], "before_version");
+        assert_eq!(json["gitCommands"][0][0], "git");
+        assert_eq!(json["gitCommands"][0][1], "add");
+        assert_eq!(json["warnings"][0], "working tree is dirty");
         Ok(())
     }
 

@@ -26,6 +26,8 @@ pub struct VersionConfig {
 pub struct WorkspaceConfig {
     pub patterns: Vec<String>,
     pub include_root: bool,
+    pub ignore: Vec<String>,
+    pub use_gitignore: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +65,7 @@ pub struct GithubReleaseConfig {
 #[serde(deny_unknown_fields)]
 struct RawConfig {
     version: Option<RawVersionConfig>,
-    workspaces: RawWorkspaceConfig,
+    workspaces: Option<RawWorkspaceConfig>,
     changelog: Option<RawChangelogConfig>,
     git: Option<RawGitConfig>,
     hooks: Option<RawHooksConfig>,
@@ -81,8 +83,10 @@ struct RawVersionConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawWorkspaceConfig {
-    patterns: Vec<String>,
+    patterns: Option<Vec<String>>,
     include_root: Option<bool>,
+    ignore: Option<Vec<String>>,
+    use_gitignore: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,7 +128,7 @@ pub fn load_config(path: &Path) -> Result<Config, String> {
     let contents = fs::read_to_string(path).map_err(|error| {
         if error.kind() == ErrorKind::NotFound {
             format!(
-                "failed to read {}: {error}\nCreate a verso.toml with:\n\n[workspaces]\npatterns = [\"packages/*\"]\n\nOr pass a different config path with --config <PATH>.",
+                "failed to read {}: {error}\nCreate a verso.toml with `verso init`, or omit [workspaces] for a single-package release.\nPass a different config path with --config <PATH>.",
                 path.display()
             )
         } else {
@@ -132,6 +136,34 @@ pub fn load_config(path: &Path) -> Result<Config, String> {
         }
     })?;
     parse_config_with_label(&contents, &path.display().to_string())
+}
+
+pub fn default_config() -> Config {
+    Config {
+        version: VersionConfig {
+            root_package: "package.json".to_owned(),
+            require_consistent_versions: true,
+            cargo_manifest_paths: Vec::new(),
+        },
+        workspaces: WorkspaceConfig {
+            patterns: Vec::new(),
+            include_root: true,
+            ignore: Vec::new(),
+            use_gitignore: true,
+        },
+        changelog: ChangelogConfig {
+            infile: "CHANGELOG.md".to_owned(),
+            preset: "angular".to_owned(),
+        },
+        git: GitConfig {
+            require_clean_worktree: true,
+            commit_message: "chore(release): release v${version}".to_owned(),
+            tag_name: "v${version}".to_owned(),
+            push: "follow-tags".to_owned(),
+        },
+        hooks: HooksConfig::default(),
+        github_release: GithubReleaseConfig { enabled: false },
+    }
 }
 
 pub fn parse_config(contents: &str) -> Result<Config, String> {
@@ -180,8 +212,26 @@ fn parse_config_with_label(contents: &str, label: &str) -> Result<Config, String
             cargo_manifest_paths: version.cargo_manifest_paths.unwrap_or_default(),
         },
         workspaces: WorkspaceConfig {
-            patterns: raw.workspaces.patterns,
-            include_root: raw.workspaces.include_root.unwrap_or(true),
+            patterns: raw
+                .workspaces
+                .as_ref()
+                .and_then(|workspaces| workspaces.patterns.clone())
+                .unwrap_or_default(),
+            include_root: raw
+                .workspaces
+                .as_ref()
+                .and_then(|workspaces| workspaces.include_root)
+                .unwrap_or(true),
+            ignore: raw
+                .workspaces
+                .as_ref()
+                .and_then(|workspaces| workspaces.ignore.clone())
+                .unwrap_or_default(),
+            use_gitignore: raw
+                .workspaces
+                .as_ref()
+                .and_then(|workspaces| workspaces.use_gitignore)
+                .unwrap_or(true),
         },
         changelog: ChangelogConfig {
             infile: changelog
@@ -217,8 +267,11 @@ fn parse_config_with_label(contents: &str, label: &str) -> Result<Config, String
 }
 
 fn validate_config(config: &Config) -> Result<(), String> {
-    if config.workspaces.patterns.is_empty() {
-        return Err("workspaces.patterns must contain at least one pattern".to_string());
+    if config.workspaces.patterns.is_empty() && !config.workspaces.include_root {
+        return Err(
+            "workspaces.patterns must contain at least one pattern when workspaces.include_root is false"
+                .to_string(),
+        );
     }
     if config.version.root_package.trim().is_empty() {
         return Err("version.root_package must not be empty".to_string());
@@ -250,6 +303,17 @@ fn validate_config(config: &Config) -> Result<(), String> {
         return Err("workspaces.patterns must not contain empty patterns".to_string());
     }
     for pattern in &config.workspaces.patterns {
+        validate_workspace_pattern(pattern)?;
+    }
+    if config
+        .workspaces
+        .ignore
+        .iter()
+        .any(|pattern| pattern.trim().is_empty())
+    {
+        return Err("workspaces.ignore must not contain empty patterns".to_string());
+    }
+    for pattern in &config.workspaces.ignore {
         validate_workspace_pattern(pattern)?;
     }
     validate_config_relative_path("version.root_package", &config.version.root_package)?;
@@ -393,6 +457,8 @@ mod tests {
         assert!(config.version.cargo_manifest_paths.is_empty());
         assert_eq!(config.workspaces.patterns, vec!["packages/*"]);
         assert!(config.workspaces.include_root);
+        assert!(config.workspaces.ignore.is_empty());
+        assert!(config.workspaces.use_gitignore);
         assert_eq!(config.changelog.infile, "CHANGELOG.md");
         assert_eq!(config.changelog.preset, "angular");
         assert!(config.git.require_clean_worktree);
@@ -406,6 +472,32 @@ mod tests {
         assert!(!config.github_release.enabled);
 
         Ok(())
+    }
+
+    #[test]
+    fn config_without_workspaces_uses_single_package_defaults() -> Result<(), String> {
+        let config = parse_config("")?;
+
+        assert_eq!(config.workspaces.patterns, Vec::<String>::new());
+        assert!(config.workspaces.include_root);
+        assert!(config.workspaces.ignore.is_empty());
+        assert!(config.workspaces.use_gitignore);
+        assert_eq!(config.version.root_package, "package.json");
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_empty_workspace_discovery_when_root_is_excluded() {
+        let error = parse_config(
+            r#"
+            [workspaces]
+            include_root = false
+            "#,
+        )
+        .expect_err("config with no root and no workspace patterns should be rejected");
+
+        assert!(error.contains("workspaces.patterns"));
+        assert!(error.contains("include_root"));
     }
 
     #[test]
@@ -453,9 +545,8 @@ mod tests {
         let error = load_config(&config_path).expect_err("missing config should fail");
 
         assert!(error.contains("failed to read"));
-        assert!(error.contains("Create a verso.toml"));
-        assert!(error.contains("[workspaces]"));
-        assert!(error.contains("patterns = [\"packages/*\"]"));
+        assert!(error.contains("verso init"));
+        assert!(error.contains("single-package"));
         assert!(error.contains("--config <PATH>"));
     }
 
@@ -479,6 +570,7 @@ mod tests {
             r#"
             [workspaces]
             patterns = []
+            include_root = false
             "#,
         )
         .expect_err("empty workspace patterns should be rejected");
