@@ -92,6 +92,93 @@ fn release_updates_versions_changelog_commit_and_tag_before_push(
 }
 
 #[test]
+fn release_runs_hooks_in_order_before_push_failure() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = TempDir::new()?;
+    write_release_fixture(repo.path())?;
+    write_file(
+        &repo.path().join("verso.toml"),
+        r#"
+[workspaces]
+patterns = ["packages/*"]
+include_root = true
+
+[hooks]
+before_version = "git config --file hook.log --add hooks.step before_version"
+after_version = "git config --file hook.log --add hooks.step after_version"
+before_commit = "git config --file hook.log --add hooks.step before_commit"
+after_commit = "git config --file hook.log --add hooks.step after_commit"
+before_tag = "git config --file hook.log --add hooks.step before_tag"
+after_tag = "git config --file hook.log --add hooks.step after_tag"
+before_push = "git config --file hook.log --add hooks.step before_push"
+"#,
+    )?;
+    git(repo.path(), &["add", "verso.toml"])?;
+    git(repo.path(), &["commit", "-m", "test: add hooks"])?;
+
+    Command::cargo_bin("verso")?
+        .current_dir(repo.path())
+        .args(["--version", "0.2.0", "--yes"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("git push --follow-tags"));
+
+    assert_eq!(
+        git_stdout(
+            repo.path(),
+            &["config", "--file", "hook.log", "--get-all", "hooks.step"]
+        )?,
+        concat!(
+            "before_version\n",
+            "after_version\n",
+            "before_commit\n",
+            "after_commit\n",
+            "before_tag\n",
+            "after_tag\n",
+            "before_push\n",
+        )
+    );
+
+    Ok(())
+}
+
+#[test]
+fn after_version_hook_failure_rolls_back_release_files() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = TempDir::new()?;
+    write_release_fixture(repo.path())?;
+    write_file(
+        &repo.path().join("verso.toml"),
+        r#"
+[workspaces]
+patterns = ["packages/*"]
+include_root = true
+
+[hooks]
+after_version = "git config --file hook.log --get missing.key"
+"#,
+    )?;
+    git(repo.path(), &["add", "verso.toml"])?;
+    git(repo.path(), &["commit", "-m", "test: add failing hook"])?;
+
+    Command::cargo_bin("verso")?
+        .current_dir(repo.path())
+        .args(["--version", "0.2.0", "--yes"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("hook after_version failed"));
+
+    assert!(
+        fs::read_to_string(repo.path().join("package.json"))?.contains("\"version\": \"0.1.0\"")
+    );
+    assert!(!fs::read_to_string(repo.path().join("CHANGELOG.md"))?.contains("0.2.0"));
+    assert_eq!(
+        git_stdout(repo.path(), &["status", "--porcelain"])?,
+        String::new()
+    );
+
+    Ok(())
+}
+
+#[test]
 fn release_prompts_before_each_mutating_step() -> Result<(), Box<dyn std::error::Error>> {
     let repo = TempDir::new()?;
     write_release_fixture(repo.path())?;

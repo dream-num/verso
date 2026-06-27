@@ -3,7 +3,7 @@ use crate::{
     changelog::{self, render_changelog_entry},
     cli::Cli,
     config::{self, render_template},
-    dry_run::{render_dry_run, ReleasePlan},
+    dry_run::{render_dry_run, PlannedHook, ReleasePlan},
     git, package_json,
     rollback::ChangeSet,
     versioning::{bump_prerelease, bump_stable, parse_custom_version, BaseBump, PrereleaseChannel},
@@ -14,6 +14,7 @@ use std::{
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
+    process::Command,
 };
 
 pub fn run(cli: Cli) -> Result<(), String> {
@@ -64,6 +65,7 @@ pub fn run(cli: Cli) -> Result<(), String> {
             changelog_file,
             commit_message,
             tag_name,
+            hooks: planned_hooks(&config.hooks),
             warnings,
         };
         print!("{}", render_dry_run(&root, &plan));
@@ -94,6 +96,7 @@ pub fn run(cli: Cli) -> Result<(), String> {
         &format!("Modify release files for {target_version}?"),
         cli.yes,
     )?;
+    run_hook(&root, "before_version", &config.hooks.before_version)?;
     let release_files = write_release_files(
         &packages,
         &cargo_manifest_files,
@@ -102,10 +105,16 @@ pub fn run(cli: Cli) -> Result<(), String> {
         &target_version,
         &changelog_entry,
     )?;
+    if let Err(error) = run_hook(&root, "after_version", &config.hooks.after_version) {
+        return Err(rollback_add_failure(&root, &release_files, error));
+    }
     confirm_release_step(
         &format!("Commit release files with \"{commit_message}\"?"),
         cli.yes,
     )?;
+    if let Err(error) = run_hook(&root, "before_commit", &config.hooks.before_commit) {
+        return Err(rollback_commit_failure(&root, &release_files, error));
+    }
     if let Err(error) = git_add_release_files(&root, &release_files.changed_paths) {
         return Err(rollback_add_failure(&root, &release_files, error));
     }
@@ -113,7 +122,25 @@ pub fn run(cli: Cli) -> Result<(), String> {
         return Err(rollback_commit_failure(&root, &release_files, error));
     }
     let release_head = git::current_head(&root)?;
+    if let Err(error) = run_hook(&root, "after_commit", &config.hooks.after_commit) {
+        return Err(rollback_tag_failure(
+            &root,
+            &release_files,
+            &before_head,
+            &release_head,
+            error,
+        ));
+    }
     confirm_release_step(&format!("Create tag {tag_name}?"), cli.yes)?;
+    if let Err(error) = run_hook(&root, "before_tag", &config.hooks.before_tag) {
+        return Err(rollback_tag_failure(
+            &root,
+            &release_files,
+            &before_head,
+            &release_head,
+            error,
+        ));
+    }
     if let Err(error) = git::git(&root, &["tag", "-a", &tag_name, "-m", &tag_name]) {
         return Err(rollback_tag_failure(
             &root,
@@ -123,12 +150,33 @@ pub fn run(cli: Cli) -> Result<(), String> {
             error,
         ));
     }
+    if let Err(error) = run_hook(&root, "after_tag", &config.hooks.after_tag) {
+        return Err(rollback_after_tag_failure(
+            &root,
+            &release_files,
+            &before_head,
+            &release_head,
+            &tag_name,
+            error,
+        ));
+    }
     confirm_release_step("Push release commit and tag?", cli.yes)?;
+    if let Err(error) = run_hook(&root, "before_push", &config.hooks.before_push) {
+        return Err(rollback_after_tag_failure(
+            &root,
+            &release_files,
+            &before_head,
+            &release_head,
+            &tag_name,
+            error,
+        ));
+    }
     git::git(&root, &["push", "--follow-tags"]).map_err(|error| {
         format!(
             "{error}\nLocal release commit and tag were created. Fix the remote problem and rerun: git push --follow-tags"
         )
     })?;
+    run_hook(&root, "after_push", &config.hooks.after_push)?;
 
     Ok(())
 }
@@ -237,6 +285,66 @@ fn confirm_default_yes(question: &str) -> Result<(), String> {
     match answer.as_str() {
         "" | "y" | "Y" | "yes" | "YES" | "Yes" => Ok(()),
         _ => Err("release aborted".to_string()),
+    }
+}
+
+fn run_hook(root: &Path, name: &str, command: &Option<String>) -> Result<(), String> {
+    let Some(command) = command else {
+        return Ok(());
+    };
+
+    let status = shell_command(command)
+        .current_dir(root)
+        .status()
+        .map_err(|error| format!("failed to run hook {name}: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        let status = status.code().map_or_else(
+            || "terminated by signal".to_string(),
+            |code| code.to_string(),
+        );
+        Err(format!(
+            "hook {name} failed with status {status}: {command}"
+        ))
+    }
+}
+
+fn planned_hooks(hooks: &config::HooksConfig) -> Vec<PlannedHook> {
+    [
+        ("before_version", &hooks.before_version),
+        ("after_version", &hooks.after_version),
+        ("before_commit", &hooks.before_commit),
+        ("after_commit", &hooks.after_commit),
+        ("before_tag", &hooks.before_tag),
+        ("after_tag", &hooks.after_tag),
+        ("before_push", &hooks.before_push),
+        ("after_push", &hooks.after_push),
+    ]
+    .into_iter()
+    .filter_map(|(name, command)| {
+        command.as_ref().map(|command| PlannedHook {
+            name: name.to_owned(),
+            command: command.clone(),
+        })
+    })
+    .collect()
+}
+
+fn shell_command(command: &str) -> Command {
+    #[cfg(windows)]
+    {
+        let mut process = Command::new("cmd");
+        process.args(["/C", command]);
+        process
+    }
+
+    #[cfg(not(windows))]
+    {
+        let mut process = Command::new("sh");
+        process.args(["-c", command]);
+        process
     }
 }
 
@@ -622,6 +730,22 @@ fn rollback_tag_failure(
             )
         }
     }
+}
+
+fn rollback_after_tag_failure(
+    root: &Path,
+    release_files: &ReleaseFileChanges,
+    before_head: &str,
+    release_head: &str,
+    tag_name: &str,
+    error: String,
+) -> String {
+    let delete_tag_result = git::delete_tag(root, tag_name);
+    let mut message = rollback_tag_failure(root, release_files, before_head, release_head, error);
+    if let Err(delete_tag_error) = delete_tag_result {
+        message.push_str(&format!("; tag cleanup failed: {delete_tag_error}"));
+    }
+    message
 }
 
 fn append_best_effort_errors(

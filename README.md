@@ -38,8 +38,10 @@ Create `verso.toml` in the project root. The only required field is
 [workspaces]
 patterns = [
   "apps/*",
+  "examples/**",
   "bundle/*",
   "packages/*",
+  "!packages/**/fixtures",
   "packages-experimental/*",
   "presets/packages/*",
 ]
@@ -70,6 +72,16 @@ push = "follow-tags"
 enabled = false
 ```
 
+Hooks are optional and default to disabled:
+
+```toml
+[hooks]
+before_version = "pnpm test"
+after_version = "pnpm build"
+before_commit = "pnpm lint"
+after_push = "node scripts/notify-release.mts"
+```
+
 `changelog.preset` currently supports `angular` only. `git.push` currently
 supports `follow-tags` only. The CLI does not create GitHub Releases from
 project configs yet, so `github_release.enabled = true` is rejected. Verso's
@@ -80,7 +92,7 @@ release workflow.
 
 | Key | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `workspaces.patterns` | Yes | None | Package workspace glob patterns relative to the config directory. Use forward slashes. The array must not be empty. |
+| `workspaces.patterns` | Yes | None | Package workspace glob patterns relative to the config directory. Use forward slashes. Supports `*`, `**`, `?`, character classes, braces, and `!` exclusions. The array must not be empty. |
 | `workspaces.include_root` | No | `true` | Include the root package selected by `version.root_package`. |
 | `version.root_package` | No | `package.json` | Package used for the current version and root update. Use forward slashes; must stay under the config directory. |
 | `version.require_consistent_versions` | No | `true` | Fail when discovered packages or configured Cargo manifests do not share one version. |
@@ -92,6 +104,14 @@ release workflow.
 | `git.tag_name` | No | `v${version}` | Must contain `${version}` and render a valid Git tag. |
 | `git.push` | No | `follow-tags` | Only `follow-tags` is supported. |
 | `github_release.enabled` | No | `false` | `true` is rejected in this version. |
+| `hooks.before_version` | No | None | Shell command run before release files are updated. |
+| `hooks.after_version` | No | None | Shell command run after release files are updated. |
+| `hooks.before_commit` | No | None | Shell command run before staging and committing. |
+| `hooks.after_commit` | No | None | Shell command run after the release commit is created. |
+| `hooks.before_tag` | No | None | Shell command run before the release tag is created. |
+| `hooks.after_tag` | No | None | Shell command run after the release tag is created. |
+| `hooks.before_push` | No | None | Shell command run before `git push --follow-tags`. |
+| `hooks.after_push` | No | None | Shell command run after the push succeeds. |
 
 ## CLI
 
@@ -138,7 +158,8 @@ present, and prepends `CHANGELOG.md`.
 
 Dry runs do not write files or run mutating git commands. They print the
 current version, target version, warnings, changelog path, planned git commands,
-and a tree of version files that would be updated.
+planned hooks, and a tree of version files that would be updated. Dry runs list
+hooks but do not execute them.
 
 If a local release command fails, Verso makes a best-effort rollback of files it
 modified, unstages release paths, and cleans up local release state where that

@@ -11,6 +11,7 @@ pub struct Config {
     pub workspaces: WorkspaceConfig,
     pub changelog: ChangelogConfig,
     pub git: GitConfig,
+    pub hooks: HooksConfig,
     pub github_release: GithubReleaseConfig,
 }
 
@@ -41,6 +42,18 @@ pub struct GitConfig {
     pub push: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HooksConfig {
+    pub before_version: Option<String>,
+    pub after_version: Option<String>,
+    pub before_commit: Option<String>,
+    pub after_commit: Option<String>,
+    pub before_tag: Option<String>,
+    pub after_tag: Option<String>,
+    pub before_push: Option<String>,
+    pub after_push: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubReleaseConfig {
     pub enabled: bool,
@@ -53,6 +66,7 @@ struct RawConfig {
     workspaces: RawWorkspaceConfig,
     changelog: Option<RawChangelogConfig>,
     git: Option<RawGitConfig>,
+    hooks: Option<RawHooksConfig>,
     github_release: Option<RawGithubReleaseConfig>,
 }
 
@@ -85,6 +99,19 @@ struct RawGitConfig {
     commit_message: Option<String>,
     tag_name: Option<String>,
     push: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawHooksConfig {
+    before_version: Option<String>,
+    after_version: Option<String>,
+    before_commit: Option<String>,
+    after_commit: Option<String>,
+    before_tag: Option<String>,
+    after_tag: Option<String>,
+    before_push: Option<String>,
+    after_push: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,6 +157,16 @@ fn parse_config_with_label(contents: &str, label: &str) -> Result<Config, String
         tag_name: None,
         push: None,
     });
+    let hooks = raw.hooks.unwrap_or(RawHooksConfig {
+        before_version: None,
+        after_version: None,
+        before_commit: None,
+        after_commit: None,
+        before_tag: None,
+        after_tag: None,
+        before_push: None,
+        after_push: None,
+    });
     let github_release = raw
         .github_release
         .unwrap_or(RawGithubReleaseConfig { enabled: None });
@@ -159,6 +196,16 @@ fn parse_config_with_label(contents: &str, label: &str) -> Result<Config, String
                 .unwrap_or_else(|| "chore(release): release v${version}".to_string()),
             tag_name: git.tag_name.unwrap_or_else(|| "v${version}".to_string()),
             push: git.push.unwrap_or_else(|| "follow-tags".to_string()),
+        },
+        hooks: HooksConfig {
+            before_version: normalize_hook(hooks.before_version),
+            after_version: normalize_hook(hooks.after_version),
+            before_commit: normalize_hook(hooks.before_commit),
+            after_commit: normalize_hook(hooks.after_commit),
+            before_tag: normalize_hook(hooks.before_tag),
+            after_tag: normalize_hook(hooks.after_tag),
+            before_push: normalize_hook(hooks.before_push),
+            after_push: normalize_hook(hooks.after_push),
         },
         github_release: GithubReleaseConfig {
             enabled: github_release.enabled.unwrap_or(false),
@@ -203,7 +250,7 @@ fn validate_config(config: &Config) -> Result<(), String> {
         return Err("workspaces.patterns must not contain empty patterns".to_string());
     }
     for pattern in &config.workspaces.patterns {
-        validate_config_relative_path("workspaces.patterns", pattern)?;
+        validate_workspace_pattern(pattern)?;
     }
     validate_config_relative_path("version.root_package", &config.version.root_package)?;
     if config
@@ -224,8 +271,34 @@ fn validate_config(config: &Config) -> Result<(), String> {
     if config.git.push != "follow-tags" {
         return Err("only git.push = \"follow-tags\" is supported".to_string());
     }
+    validate_hooks(&config.hooks)?;
     if config.github_release.enabled {
         return Err("github_release.enabled = true is not supported in this version".to_string());
+    }
+    Ok(())
+}
+
+fn normalize_hook(command: Option<String>) -> Option<String> {
+    command.and_then(|command| {
+        let trimmed = command.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    })
+}
+
+fn validate_hooks(hooks: &HooksConfig) -> Result<(), String> {
+    for (name, command) in [
+        ("before_version", &hooks.before_version),
+        ("after_version", &hooks.after_version),
+        ("before_commit", &hooks.before_commit),
+        ("after_commit", &hooks.after_commit),
+        ("before_tag", &hooks.before_tag),
+        ("after_tag", &hooks.after_tag),
+        ("before_push", &hooks.before_push),
+        ("after_push", &hooks.after_push),
+    ] {
+        if matches!(command, Some(command) if command.trim().is_empty()) {
+            return Err(format!("hooks.{name} must not be empty"));
+        }
     }
     Ok(())
 }
@@ -241,6 +314,14 @@ fn validate_config_relative_path(key: &str, value: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn validate_workspace_pattern(pattern: &str) -> Result<(), String> {
+    let pattern = pattern.strip_prefix('!').unwrap_or(pattern);
+    if pattern.trim().is_empty() {
+        return Err("workspaces.patterns must not contain empty patterns".to_string());
+    }
+    validate_config_relative_path("workspaces.patterns", pattern)
 }
 
 fn uses_platform_specific_path_syntax(value: &str) -> bool {
@@ -321,8 +402,31 @@ mod tests {
         );
         assert_eq!(config.git.tag_name, "v${version}");
         assert_eq!(config.git.push, "follow-tags");
+        assert_eq!(config.hooks, HooksConfig::default());
         assert!(!config.github_release.enabled);
 
+        Ok(())
+    }
+
+    #[test]
+    fn parses_hooks_and_trims_commands() -> Result<(), String> {
+        let config = parse_config(
+            r#"
+            [workspaces]
+            patterns = ["packages/*"]
+
+            [hooks]
+            before_version = " pnpm test "
+            after_push = "node scripts/notify-release.mts"
+            "#,
+        )?;
+
+        assert_eq!(config.hooks.before_version.as_deref(), Some("pnpm test"));
+        assert_eq!(
+            config.hooks.after_push.as_deref(),
+            Some("node scripts/notify-release.mts")
+        );
+        assert_eq!(config.hooks.before_commit, None);
         Ok(())
     }
 

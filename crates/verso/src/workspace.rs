@@ -2,7 +2,9 @@ use crate::{
     config::Config,
     package_json::{read_package, PackageInfo},
 };
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use std::{
+    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -18,13 +20,17 @@ pub fn discover_packages(root: &Path, config: &Config) -> Result<Vec<PackageFile
     let mut package_paths = Vec::new();
     let mut matched_workspace_package = false;
     let root_package = root.join(&config.version.root_package);
+    let workspace_patterns = WorkspacePatterns::new(&config.workspaces.patterns)?;
 
     if config.workspaces.include_root && root_package.exists() {
         package_paths.push(root_package.clone());
     }
 
-    for pattern in &config.workspaces.patterns {
-        for dir in expand_workspace_pattern(root, pattern)? {
+    for search_root in workspace_search_roots(root, &config.workspaces.patterns) {
+        for dir in collect_dirs(&search_root)? {
+            if !workspace_patterns.is_match(root, &dir) {
+                continue;
+            }
             let package_json = dir.join("package.json");
             if package_json.exists() {
                 if package_json != root_package {
@@ -98,60 +104,108 @@ pub fn verify_consistent_versions(packages: &[PackageFile]) -> Result<(), String
     Err(format!("package versions differ: {}", details.join("; ")))
 }
 
-fn expand_workspace_pattern(root: &Path, pattern: &str) -> Result<Vec<PathBuf>, String> {
-    let wildcard_count = pattern.matches('*').count();
-    match wildcard_count {
-        0 => Ok(vec![root.join(pattern)]),
-        1 => expand_one_wildcard_pattern(root, pattern),
-        _ => Err(format!(
-            "workspace pattern {pattern:?} contains more than one wildcard"
-        )),
+struct WorkspacePatterns {
+    includes: GlobSet,
+    excludes: GlobSet,
+}
+
+impl WorkspacePatterns {
+    fn new(patterns: &[String]) -> Result<Self, String> {
+        let mut includes = GlobSetBuilder::new();
+        let mut excludes = GlobSetBuilder::new();
+
+        for pattern in patterns {
+            let (excluded, pattern) = match pattern.strip_prefix('!') {
+                Some(pattern) => (true, pattern),
+                None => (false, pattern.as_str()),
+            };
+            let glob = GlobBuilder::new(pattern)
+                .literal_separator(true)
+                .build()
+                .map_err(|error| format!("invalid workspace pattern {pattern:?}: {error}"))?;
+            if excluded {
+                excludes.add(glob);
+            } else {
+                includes.add(glob);
+            }
+        }
+
+        Ok(Self {
+            includes: includes
+                .build()
+                .map_err(|error| format!("failed to build workspace include patterns: {error}"))?,
+            excludes: excludes
+                .build()
+                .map_err(|error| format!("failed to build workspace exclude patterns: {error}"))?,
+        })
+    }
+
+    fn is_match(&self, root: &Path, dir: &Path) -> bool {
+        let Ok(relative) = dir.strip_prefix(root) else {
+            return false;
+        };
+        self.includes.is_match(relative) && !self.excludes.is_match(relative)
     }
 }
 
-fn expand_one_wildcard_pattern(root: &Path, pattern: &str) -> Result<Vec<PathBuf>, String> {
-    let (prefix, suffix) = pattern
-        .split_once('*')
-        .ok_or_else(|| format!("workspace pattern {pattern:?} did not contain a wildcard"))?;
-    let prefix = prefix.trim_end_matches('/');
-    let suffix = suffix.trim_start_matches('/');
-    let base = if prefix.is_empty() {
-        root.to_path_buf()
-    } else {
-        root.join(prefix)
-    };
-
-    let entries = match fs::read_dir(&base) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(format!(
-                "failed to read workspace pattern {pattern:?} at {}: {error}",
-                base.display()
-            ));
+fn workspace_search_roots(root: &Path, patterns: &[String]) -> Vec<PathBuf> {
+    let mut roots = BTreeSet::new();
+    for pattern in patterns {
+        if pattern.starts_with('!') {
+            continue;
         }
-    };
+        let prefix = static_pattern_prefix(pattern);
+        let search_root = if prefix.is_empty() {
+            root.to_path_buf()
+        } else {
+            root.join(prefix)
+        };
+        roots.insert(search_root);
+    }
+    roots.into_iter().collect()
+}
 
-    let mut dirs = Vec::new();
+fn static_pattern_prefix(pattern: &str) -> String {
+    let glob_start = pattern
+        .char_indices()
+        .find_map(|(index, character)| matches!(character, '*' | '?' | '[' | '{').then_some(index))
+        .unwrap_or(pattern.len());
+    let prefix = &pattern[..glob_start];
+    match prefix.rsplit_once('/') {
+        Some((parent, _segment)) => parent.trim_end_matches('/').to_owned(),
+        None if glob_start == pattern.len() => pattern.trim_end_matches('/').to_owned(),
+        None => String::new(),
+    }
+}
+
+fn collect_dirs(root: &Path) -> Result<Vec<PathBuf>, String> {
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut dirs = vec![root.to_path_buf()];
+    let entries = fs::read_dir(root).map_err(|error| {
+        format!(
+            "failed to read workspace directory {}: {error}",
+            root.display()
+        )
+    })?;
     for entry in entries {
         let entry = entry.map_err(|error| {
             format!(
-                "failed to read workspace pattern {pattern:?} at {}: {error}",
-                base.display()
+                "failed to read workspace directory {}: {error}",
+                root.display()
             )
         })?;
         let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let candidate = if suffix.is_empty() {
-            path
-        } else {
-            path.join(suffix)
-        };
-        if candidate.is_dir() {
-            dirs.push(candidate);
+        if path.is_dir() {
+            if path.file_name().is_some_and(|name| name == "node_modules") {
+                continue;
+            }
+            dirs.extend(collect_dirs(&path)?);
         }
     }
 
@@ -169,7 +223,8 @@ fn package_label(package: &PackageFile) -> String {
 mod tests {
     use super::*;
     use crate::config::{
-        ChangelogConfig, Config, GitConfig, GithubReleaseConfig, VersionConfig, WorkspaceConfig,
+        ChangelogConfig, Config, GitConfig, GithubReleaseConfig, HooksConfig, VersionConfig,
+        WorkspaceConfig,
     };
     use std::{fs, path::Path};
     use tempfile::TempDir;
@@ -248,10 +303,84 @@ mod tests {
     }
 
     #[test]
+    fn discovers_packages_with_recursive_workspace_globs() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        write_package(&temp.path().join("packages/nested/b"), "b", "1.2.3")?;
+        let config = test_config(vec!["packages/**"], false);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(
+            &packages,
+            &[
+                &temp.path().join("packages/a"),
+                &temp.path().join("packages/nested/b"),
+            ],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn excludes_packages_with_negative_workspace_globs() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        write_package(&temp.path().join("packages/demo"), "demo", "1.2.3")?;
+        write_package(
+            &temp.path().join("packages/nested/fixture"),
+            "fixture",
+            "1.2.3",
+        )?;
+        let config = test_config(
+            vec!["packages/**", "!packages/demo", "!packages/**/fixture"],
+            false,
+        );
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(&packages, &[&temp.path().join("packages/a")]);
+        Ok(())
+    }
+
+    #[test]
+    fn recursive_workspace_globs_ignore_node_modules() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        write_package(
+            &temp.path().join("packages/a/node_modules/dependency"),
+            "dependency",
+            "9.9.9",
+        )?;
+        let config = test_config(vec!["packages/**"], false);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(&packages, &[&temp.path().join("packages/a")]);
+        Ok(())
+    }
+
+    #[test]
     fn skips_root_when_include_root_is_false() -> Result<(), String> {
         let temp = TempDir::new().map_err(|error| error.to_string())?;
         write_package(temp.path(), "root", "1.2.3")?;
         write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        let config = test_config(vec!["packages/*"], false);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(&packages, &[&temp.path().join("packages/a")]);
+        Ok(())
+    }
+
+    #[test]
+    fn single_star_workspace_globs_do_not_cross_path_segments() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        write_package(
+            &temp.path().join("packages/a/node_modules/dependency"),
+            "dependency",
+            "9.9.9",
+        )?;
         let config = test_config(vec!["packages/*"], false);
 
         let packages = discover_packages(temp.path(), &config)?;
@@ -365,6 +494,7 @@ mod tests {
                 tag_name: "v${version}".to_owned(),
                 push: "follow-tags".to_owned(),
             },
+            hooks: HooksConfig::default(),
             github_release: GithubReleaseConfig { enabled: false },
         }
     }

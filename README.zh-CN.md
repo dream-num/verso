@@ -34,8 +34,10 @@ pnpm add -D @univerkit/verso
 [workspaces]
 patterns = [
   "apps/*",
+  "examples/**",
   "bundle/*",
   "packages/*",
+  "!packages/**/fixtures",
   "packages-experimental/*",
   "presets/packages/*",
 ]
@@ -66,13 +68,23 @@ push = "follow-tags"
 enabled = false
 ```
 
+hooks 是可选配置，默认全部关闭：
+
+```toml
+[hooks]
+before_version = "pnpm test"
+after_version = "pnpm build"
+before_commit = "pnpm lint"
+after_push = "node scripts/notify-release.mts"
+```
+
 `changelog.preset` 当前只支持 `angular`。`git.push` 当前只支持 `follow-tags`。Verso 目前不会根据项目配置创建 GitHub Release，因此 `github_release.enabled = true` 会被拒绝。Verso 自身的二进制产物由本仓库的 GitHub Actions release workflow 附加到 GitHub Release。
 
 ### 配置项
 
 | 配置项 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `workspaces.patterns` | 是 | 无 | 相对于配置文件目录的 package workspace glob。使用正斜杠，数组不能为空。 |
+| `workspaces.patterns` | 是 | 无 | 相对于配置文件目录的 package workspace glob。使用正斜杠，支持 `*`、`**`、`?`、字符类、brace，以及 `!` 排除模式。数组不能为空。 |
 | `workspaces.include_root` | 否 | `true` | 是否包含 `version.root_package` 指向的根 package。 |
 | `version.root_package` | 否 | `package.json` | 用于读取当前版本并参与更新的根 package。路径必须在配置文件目录内。 |
 | `version.require_consistent_versions` | 否 | `true` | 发现 package 或配置的 Cargo manifest 版本不一致时是否失败。 |
@@ -84,6 +96,14 @@ enabled = false
 | `git.tag_name` | 否 | `v${version}` | release tag 模板。必须包含 `${version}`，并渲染为合法 Git tag。 |
 | `git.push` | 否 | `follow-tags` | 目前只支持 `follow-tags`。 |
 | `github_release.enabled` | 否 | `false` | 当前版本不支持设为 `true`。 |
+| `hooks.before_version` | 否 | 无 | 更新 release 文件前执行的 shell 命令。 |
+| `hooks.after_version` | 否 | 无 | 更新 release 文件后执行的 shell 命令。 |
+| `hooks.before_commit` | 否 | 无 | 暂存并提交前执行的 shell 命令。 |
+| `hooks.after_commit` | 否 | 无 | release commit 创建后执行的 shell 命令。 |
+| `hooks.before_tag` | 否 | 无 | 创建 release tag 前执行的 shell 命令。 |
+| `hooks.after_tag` | 否 | 无 | release tag 创建后执行的 shell 命令。 |
+| `hooks.before_push` | 否 | 无 | 执行 `git push --follow-tags` 前执行的 shell 命令。 |
+| `hooks.after_push` | 否 | 无 | push 成功后执行的 shell 命令。 |
 
 ## CLI
 
@@ -114,7 +134,7 @@ pnpm release -- --help
 
 Verso 会读取配置，发现匹配的 `package.json`，在启用一致性检查时确认版本一致，然后解析目标版本。实际发布时，它会在更新 release 文件、提交、打 tag、推送前分别请求确认。这些确认默认是 yes：直接回车会继续，输入 `n` 会在下一步开始前停止；传入 `--yes` 时这些确认会被跳过。更新 release 文件会修改 package 文件、配置的 Cargo manifest 以及对应最近的 `Cargo.lock`，并把 `CHANGELOG.md` 追加到顶部。
 
-Dry run 不会写文件，也不会执行会修改状态的 git 命令。它会打印当前版本、目标版本、警告、changelog 路径、计划执行的 git 命令，以及将被更新的版本文件树。
+Dry run 不会写文件，也不会执行会修改状态的 git 命令。它会打印当前版本、目标版本、警告、changelog 路径、计划执行的 git 命令、计划执行的 hooks，以及将被更新的版本文件树。Dry run 只列出 hooks，不会执行 hooks。
 
 如果本地发布命令执行失败，Verso 会尽力回滚自己修改过的文件、取消暂存 release 路径，并在安全时清理本地 release 状态。如果你在发布确认里输入 `n`，Verso 会停止流程，但不会回滚已经完成的步骤。如果最后 push 失败，本地 release commit 和 tag 会保留，你可以修复远端问题后执行 `git push --follow-tags`。远端 push 成功后的回滚需要手动处理。
 

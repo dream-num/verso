@@ -13,7 +13,14 @@ pub struct ReleasePlan {
     pub changelog_file: PathBuf,
     pub commit_message: String,
     pub tag_name: String,
+    pub hooks: Vec<PlannedHook>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedHook {
+    pub name: String,
+    pub command: String,
 }
 
 pub fn render_dry_run(root: &Path, plan: &ReleasePlan) -> String {
@@ -51,6 +58,13 @@ pub fn render_dry_run(root: &Path, plan: &ReleasePlan) -> String {
 
     let changelog = relative_path(root, &plan.changelog_file);
     output.push_str(&format!("\nChangelog: {}\n", changelog.display()));
+
+    if !plan.hooks.is_empty() {
+        output.push_str("\nPlanned hooks:\n");
+        for hook in &plan.hooks {
+            output.push_str(&format!("{}: {}\n", hook.name, hook.command));
+        }
+    }
 
     let mut git_add_files = version_files;
     git_add_files.push(plan.changelog_file.clone());
@@ -279,6 +293,33 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn dry_run_lists_planned_hooks() -> Result<(), String> {
+        let root = TempDir::new().map_err(|error| error.to_string())?;
+        let mut plan = test_plan(
+            root.path(),
+            vec![root.path().join("packages/verso/package.json")],
+            Vec::new(),
+        )?;
+        plan.hooks = vec![
+            PlannedHook {
+                name: "before_version".to_owned(),
+                command: "pnpm test".to_owned(),
+            },
+            PlannedHook {
+                name: "after_version".to_owned(),
+                command: "pnpm build".to_owned(),
+            },
+        ];
+
+        let output = render_dry_run(root.path(), &plan);
+
+        assert!(output.contains("Planned hooks:\n"));
+        assert!(output.contains("before_version: pnpm test\n"));
+        assert!(output.contains("after_version: pnpm build\n"));
+        Ok(())
+    }
+
     fn test_plan(
         root: &Path,
         package_files: Vec<PathBuf>,
@@ -292,6 +333,7 @@ mod tests {
             changelog_file: root.join("docs/CHANGELOG.md"),
             commit_message: "chore(release): release v1.3.0".to_owned(),
             tag_name: "v1.3.0".to_owned(),
+            hooks: Vec::new(),
             warnings,
         })
     }
