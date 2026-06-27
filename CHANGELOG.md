@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.0-beta.1](https://github.com/dream-num/verso/compare/v1.0.0-beta.0...v1.0.0-beta.1) (2026-06-27)
+
+### Features
+
+* **verso:** add release hooks and expand workspace globs ([93d5ed0](https://github.com/dream-num/verso/commit/93d5ed0ae95bd3e090d2620479d94dd222b62be2))
+
 ## [1.0.0-beta.0](https://github.com/dream-num/verso/compare/v1.0.0-alpha.2...v1.0.0-beta.0) (2026-06-25)
 
 ### Features
