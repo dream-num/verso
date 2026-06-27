@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.0-beta.2](https://github.com/dream-num/verso/compare/v1.0.0-beta.1...v1.0.0-beta.2) (2026-06-27)
+
+### Features
+
+* support configless single-package releases ([2803edc](https://github.com/dream-num/verso/commit/2803edc2b02fe22bce2fdd2b897154e7107494ee))
+
 ## [1.0.0-beta.1](https://github.com/dream-num/verso/compare/v1.0.0-beta.0...v1.0.0-beta.1) (2026-06-27)
 
 ### Features
