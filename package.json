@@ -24,8 +24,8 @@
     "check:npm": "pnpm --filter @univerkit/verso typecheck && pnpm --filter @univerkit/verso test",
     "check:rust": "cargo fmt --check && cargo clippy --locked --all-targets --all-features -- -D warnings && cargo test --locked --all",
     "check:scripts": "tsc -p tsconfig.json --noEmit",
-    "format": "oxfmt --ignore-path .oxfmtignore --write 'scripts/**/*.mts' 'packages/verso/**/*.{ts,mts}' && cargo fmt",
-    "format:check": "oxfmt --ignore-path .oxfmtignore --check 'scripts/**/*.mts' 'packages/verso/**/*.{ts,mts}' && cargo fmt --check",
+    "format": "oxfmt --write scripts packages/verso/src packages/verso/scripts && cargo fmt",
+    "format:check": "oxfmt --check scripts packages/verso/src packages/verso/scripts && cargo fmt --check",
     "lint": "oxlint --ignore-path .oxlintignore .",
     "release": "cargo run -p verso"
   },
