@@ -1,11 +1,13 @@
 use crate::{
     config::{Config, WorkspaceConfig},
-    package_json::{read_package, PackageInfo},
+    package_json::{manifest_names, read_package, read_package_manifest, PackageInfo},
 };
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
+use noyalib::borrowed::{from_str_borrowed, BorrowedValue};
 use std::{
     collections::BTreeSet,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -19,21 +21,23 @@ pub struct PackageFile {
 pub fn discover_packages(root: &Path, config: &Config) -> Result<Vec<PackageFile>, String> {
     let mut package_paths = Vec::new();
     let mut matched_workspace_package = false;
-    let root_package = root.join(&config.version.root_package);
-    let workspace_patterns = WorkspacePatterns::new(&config.workspaces.patterns)?;
+    let root_package = resolve_root_package_manifest(root, config);
+    let workspace_pattern_values = effective_workspace_patterns(root, config)?;
+    let workspace_patterns = WorkspacePatterns::new(&workspace_pattern_values)?;
 
-    if config.workspaces.include_root && root_package.exists() {
-        package_paths.push(root_package.clone());
+    if config.workspaces.include_root {
+        if let Some(root_package) = &root_package {
+            package_paths.push(root_package.clone());
+        }
     }
 
-    for search_root in workspace_search_roots(root, &config.workspaces.patterns) {
+    for search_root in workspace_search_roots(root, &workspace_pattern_values) {
         for dir in collect_dirs(root, &search_root, &config.workspaces)? {
             if !workspace_patterns.is_match(root, &dir) {
                 continue;
             }
-            let package_json = dir.join("package.json");
-            if package_json.exists() {
-                if package_json != root_package {
+            if let Some(package_json) = resolve_package_manifest(&dir) {
+                if Some(&package_json) != root_package.as_ref() {
                     matched_workspace_package = true;
                 }
                 package_paths.push(package_json);
@@ -65,14 +69,73 @@ pub fn discover_packages(root: &Path, config: &Config) -> Result<Vec<PackageFile
         ));
     }
 
-    if !config.workspaces.patterns.is_empty() && !matched_workspace_package {
+    if !workspace_pattern_values.is_empty() && !matched_workspace_package {
         return Err(format!(
-            "no workspace package.json files matched configured workspaces under {}",
+            "no workspace package manifests matched configured workspaces under {}",
             root.display()
         ));
     }
 
     Ok(packages)
+}
+
+fn resolve_root_package_manifest(root: &Path, config: &Config) -> Option<PathBuf> {
+    let configured = root.join(&config.version.root_package);
+    if configured.exists() {
+        return Some(configured);
+    }
+    if config.version.root_package == "package.json" {
+        return resolve_package_manifest(root);
+    }
+    None
+}
+
+pub(crate) fn resolve_package_manifest(dir: &Path) -> Option<PathBuf> {
+    manifest_names()
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.exists())
+}
+
+fn effective_workspace_patterns(root: &Path, config: &Config) -> Result<Vec<String>, String> {
+    if !config.workspaces.patterns.is_empty() {
+        return Ok(config.workspaces.patterns.clone());
+    }
+    if let Some(patterns) = read_pnpm_workspace_patterns(root)? {
+        return Ok(patterns);
+    }
+    let Some(root_manifest) = resolve_root_package_manifest(root, config) else {
+        return Ok(Vec::new());
+    };
+    Ok(read_package_manifest(&root_manifest)?
+        .workspaces
+        .unwrap_or_default())
+}
+
+fn read_pnpm_workspace_patterns(root: &Path) -> Result<Option<Vec<String>>, String> {
+    let path = root.join("pnpm-workspace.yaml");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let contents = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let value = from_str_borrowed(&contents)
+        .map_err(|error| format!("failed to parse {} as YAML: {error}", path.display()))?;
+    let Some(mapping) = value.as_mapping() else {
+        return Ok(None);
+    };
+    let Some(packages) = mapping.get("packages").and_then(BorrowedValue::as_sequence) else {
+        return Ok(None);
+    };
+    let patterns = packages
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| format!("{} packages must be strings", path.display()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(patterns))
 }
 
 pub fn verify_consistent_versions(packages: &[PackageFile]) -> Result<(), String> {
@@ -339,6 +402,99 @@ mod tests {
     }
 
     #[test]
+    fn infers_workspace_patterns_from_pnpm_workspace_yaml() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(temp.path(), "root", "1.2.3")?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        fs::write(
+            temp.path().join("pnpm-workspace.yaml"),
+            "packages:\n  - packages/*\n",
+        )
+        .map_err(|error| error.to_string())?;
+        let config = test_config(Vec::new(), true);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(&packages, &[temp.path(), &temp.path().join("packages/a")]);
+        Ok(())
+    }
+
+    #[test]
+    fn infers_workspace_patterns_from_root_manifest_workspaces() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        fs::write(
+            temp.path().join("package.json5"),
+            r#"{
+  name: "root",
+  version: "1.2.3",
+  workspaces: {
+    packages: ["packages/*"],
+  },
+}"#,
+        )
+        .map_err(|error| error.to_string())?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        let config = test_config(Vec::new(), true);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(&packages, &[temp.path(), &temp.path().join("packages/a")]);
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_workspace_patterns_override_package_manager_metadata() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(temp.path(), "root", "1.2.3")?;
+        write_package(&temp.path().join("packages/a"), "a", "1.2.3")?;
+        write_package(&temp.path().join("apps/web"), "web", "1.2.3")?;
+        fs::write(
+            temp.path().join("pnpm-workspace.yaml"),
+            "packages:\n  - packages/*\n",
+        )
+        .map_err(|error| error.to_string())?;
+        let config = test_config(vec!["apps/*"], true);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        assert_package_dirs(&packages, &[&temp.path().join("apps/web"), temp.path()]);
+        Ok(())
+    }
+
+    #[test]
+    fn discovers_yaml_package_manifests_in_workspaces() -> Result<(), String> {
+        let temp = TempDir::new().map_err(|error| error.to_string())?;
+        write_package(temp.path(), "root", "1.2.3")?;
+        fs::create_dir_all(temp.path().join("packages/a")).map_err(|error| error.to_string())?;
+        fs::write(
+            temp.path().join("packages/a/package.yaml"),
+            "name: a\nversion: 1.2.3\n",
+        )
+        .map_err(|error| error.to_string())?;
+        let config = test_config(vec!["packages/*"], true);
+
+        let packages = discover_packages(temp.path(), &config)?;
+
+        let manifests = packages
+            .iter()
+            .map(|package| {
+                package
+                    .package_json
+                    .strip_prefix(temp.path())
+                    .map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(
+            manifests,
+            vec![
+                Path::new("package.json"),
+                Path::new("packages/a/package.yaml")
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn detects_inconsistent_versions() -> Result<(), String> {
         let temp = TempDir::new().map_err(|error| error.to_string())?;
         write_package(temp.path(), "root", "1.2.3")?;
@@ -563,7 +719,7 @@ mod tests {
         let error = discover_packages(temp.path(), &config)
             .expect_err("root package alone should not satisfy workspace discovery");
 
-        assert!(error.contains("no workspace package.json files matched configured workspaces"));
+        assert!(error.contains("no workspace package manifests matched configured workspaces"));
         Ok(())
     }
 

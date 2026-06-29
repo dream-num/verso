@@ -73,6 +73,63 @@ fn single_package_release_uses_defaults_when_config_is_missing(
 }
 
 #[test]
+fn single_yaml_package_release_uses_defaults_when_config_is_missing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let repo = TempDir::new()?;
+    init_repo(repo.path())?;
+    write_file(
+        &repo.path().join("package.yaml"),
+        "name: root\nversion: 0.1.0\n",
+    )?;
+    git(repo.path(), &["add", "."])?;
+    git(repo.path(), &["commit", "-m", "feat: initial"])?;
+
+    Command::cargo_bin("verso")?
+        .current_dir(repo.path())
+        .args(["--dry-run", "--version", "0.2.0", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Package count: 1"))
+        .stdout(predicate::str::contains("package.yaml"));
+
+    Ok(())
+}
+
+#[test]
+fn dry_run_infers_pnpm_workspace_and_lists_manifest_paths() -> Result<(), Box<dyn std::error::Error>>
+{
+    let repo = TempDir::new()?;
+    init_repo(repo.path())?;
+    write_file(
+        &repo.path().join("package.json"),
+        "{\n  \"name\": \"root\",\n  \"version\": \"0.1.0\"\n}\n",
+    )?;
+    write_file(
+        &repo.path().join("packages/a/package.yaml"),
+        "name: a\nversion: 0.1.0\n",
+    )?;
+    write_file(
+        &repo.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\n",
+    )?;
+    git(repo.path(), &["add", "."])?;
+    git(repo.path(), &["commit", "-m", "feat: initial"])?;
+
+    Command::cargo_bin("verso")?
+        .current_dir(repo.path())
+        .args(["--dry-run", "--version", "0.2.0", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Package count: 2"))
+        .stdout(predicate::str::contains("packages/a/package.yaml"))
+        .stdout(predicate::str::contains(
+            "git add 'CHANGELOG.md' 'package.json' 'packages/a/package.yaml'",
+        ));
+
+    Ok(())
+}
+
+#[test]
 fn explicit_missing_config_still_fails() -> Result<(), Box<dyn std::error::Error>> {
     let repo = TempDir::new()?;
     init_repo(repo.path())?;

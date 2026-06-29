@@ -547,8 +547,11 @@ fn write_release_files(
             let contents = fs::read_to_string(&package.package_json).map_err(|error| {
                 format!("failed to read {}: {error}", package.package_json.display())
             })?;
-            let updated =
-                package_json::replace_version_preserving_style(&contents, target_version)?;
+            let updated = package_json::replace_manifest_version_preserving_style(
+                &package.package_json,
+                &contents,
+                target_version,
+            )?;
             if updated != contents {
                 changes.write(&package.package_json, updated.as_bytes())?;
                 changed_paths.push(package.package_json.clone());

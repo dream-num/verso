@@ -1,7 +1,9 @@
 use crate::{
     config::{self, Config},
     release::{current_version, release_root, verify_cargo_manifest_versions},
-    workspace::{discover_packages, verify_consistent_versions, PackageFile},
+    workspace::{
+        discover_packages, resolve_package_manifest, verify_consistent_versions, PackageFile,
+    },
 };
 use semver::Version;
 use serde::Serialize;
@@ -209,7 +211,7 @@ fn load_project_config(
             .map(|config| (config, ConfigSource::File(config_path.to_path_buf())));
     }
 
-    if allow_missing_default_config && root.join("package.json").exists() {
+    if allow_missing_default_config && resolve_package_manifest(root).is_some() {
         return Ok((
             config::default_config(),
             ConfigSource::BuiltInSinglePackageDefaults,

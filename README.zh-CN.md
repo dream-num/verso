@@ -28,7 +28,7 @@ pnpm add -D @univerkit/verso
 
 ## 配置
 
-单包项目可以不创建 `verso.toml`。默认 `verso.toml` 不存在且根目录有 `package.json` 时，Verso 会使用内置默认配置发布根 package。
+单包项目可以不创建 `verso.toml`。默认 `verso.toml` 不存在且根目录有 package manifest 时，Verso 会使用内置默认配置发布根 package。
 
 只有需要自定义发布行为时才需要创建 `verso.toml`。单包项目的配置可以很轻量：
 
@@ -51,6 +51,10 @@ patterns = [
   "presets/packages/*",
 ]
 ```
+
+如果省略 `workspaces.patterns`，Verso 会先读取包管理器的 workspace 元数据，再回退到单包模式。它支持 `pnpm-workspace.yaml` 的 `packages`、根 package manifest 里的 `workspaces: ["packages/*"]`，以及 `workspaces: { "packages": ["packages/*"] }`。
+
+package 发现支持 `package.json`、`package.json5`、`package.yaml` 和 `package.yml`。同一个目录存在多个 manifest 时，按这个顺序选择。
 
 默认配置如下：
 
@@ -93,15 +97,15 @@ after_push = "node scripts/notify-release.mts"
 
 ### 配置项
 
-未传 `--config` 且默认 `verso.toml` 不存在时，如果根目录存在 `package.json`，Verso 会回退到内置单包默认配置。显式传入的 `--config <PATH>` 必须存在。
+未传 `--config` 且默认 `verso.toml` 不存在时，如果根目录存在 package manifest，Verso 会回退到内置默认配置。显式传入的 `--config <PATH>` 必须存在。
 
 | 配置项 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `workspaces.patterns` | 否 | `[]` | 相对于配置文件目录的 package workspace glob。使用正斜杠，支持 `*`、`**`、`?`、字符类、brace，以及 `!` 排除模式。单包发布可以省略 `[workspaces]`。 |
+| `workspaces.patterns` | 否 | `[]` | 相对于配置文件目录的 package workspace glob。使用正斜杠，支持 `*`、`**`、`?`、字符类、brace，以及 `!` 排除模式。省略时会读取 `pnpm-workspace.yaml` 或根 package manifest 的 `workspaces`；如果都不存在，则使用单包模式。 |
 | `workspaces.include_root` | 否 | `true` | 是否包含 `version.root_package` 指向的根 package。 |
 | `workspaces.ignore` | 否 | `[]` | workspace 发现时额外忽略的模式。`fixtures` 这类普通路径片段会按目录名匹配。 |
 | `workspaces.use_gitignore` | 否 | `true` | workspace 发现时是否读取根目录和子目录里的 `.gitignore`。 |
-| `version.root_package` | 否 | `package.json` | 用于读取当前版本并参与更新的根 package。路径必须在配置文件目录内。 |
+| `version.root_package` | 否 | `package.json` | 用于读取当前版本并参与更新的根 package manifest。路径必须在配置文件目录内。省略且 `package.json` 不存在时，Verso 会依次查找 `package.json5`、`package.yaml`、`package.yml`。 |
 | `version.require_consistent_versions` | 否 | `true` | 发现 package 或配置的 Cargo manifest 版本不一致时是否失败。 |
 | `version.cargo_manifest_paths` | 否 | `[]` | 需要同步更新 `[package].version` 的 Cargo manifest 路径。存在最近的 `Cargo.lock` 时会一起更新。 |
 | `changelog.infile` | 否 | `CHANGELOG.md` | 发布时写入的 changelog 文件。路径必须在配置文件目录内。 |
@@ -158,11 +162,11 @@ pnpm release -- --help
 
 ## 发布时会发生什么
 
-Verso 会读取配置，发现匹配的 `package.json`，在启用一致性检查时确认版本一致，然后解析目标版本。实际发布时，它会在更新 release 文件、提交、打 tag、推送前分别请求确认。这些确认默认是 yes：直接回车会继续，输入 `n` 会在下一步开始前停止；传入 `--yes` 时这些确认会被跳过。更新 release 文件会修改 package 文件、配置的 Cargo manifest 以及对应最近的 `Cargo.lock`，并把 `CHANGELOG.md` 追加到顶部。
+Verso 会读取配置，发现匹配的 package manifest，在启用一致性检查时确认版本一致，然后解析目标版本。实际发布时，它会在更新 release 文件、提交、打 tag、推送前分别请求确认。这些确认默认是 yes：直接回车会继续，输入 `n` 会在下一步开始前停止；传入 `--yes` 时这些确认会被跳过。更新 release 文件会修改 package 文件、配置的 Cargo manifest 以及对应最近的 `Cargo.lock`，并把 `CHANGELOG.md` 追加到顶部。
 
 Dry run 不会写文件，也不会执行会修改状态的 git 命令。它会打印当前版本、目标版本、警告、changelog 路径、计划执行的 git 命令、计划执行的 hooks，以及将被更新的版本文件树。Dry run 只列出 hooks，不会执行 hooks。`--dry-run --json` 会输出结构化 release plan，方便脚本和 CI 读取。
 
-workspace 发现始终跳过 `.git` 和 `node_modules`。默认也会读取根目录和子目录里的 `.gitignore`，被忽略的目录不会继续扫描，即使里面有 `package.json` 也不会被当作发布包。如果项目确实要发布被 `.gitignore` 忽略的目录，可以设置 `workspaces.use_gitignore = false`。
+workspace 发现始终跳过 `.git` 和 `node_modules`。默认也会读取根目录和子目录里的 `.gitignore`，被忽略的目录不会继续扫描，即使里面有 package manifest 也不会被当作发布包。如果项目确实要发布被 `.gitignore` 忽略的目录，可以设置 `workspaces.use_gitignore = false`。Verso 只更新 package manifest 的版本，不会改写 workspace 内部依赖范围，也不会执行包管理器的 publish 命令。
 
 如果本地发布命令执行失败，Verso 会尽力回滚自己修改过的文件、取消暂存 release 路径，并在安全时清理本地 release 状态。如果你在发布确认里输入 `n`，Verso 会停止流程，但不会回滚已经完成的步骤。如果最后 push 失败，本地 release commit 和 tag 会保留，你可以修复远端问题后执行 `git push --follow-tags`。远端 push 成功后的回滚需要手动处理。
 

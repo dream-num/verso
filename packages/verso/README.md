@@ -39,8 +39,9 @@ Add a release script:
 ```
 
 Single-package projects can run without `verso.toml`. When the default
-`verso.toml` is missing and `package.json` exists, Verso releases the root
-package with built-in defaults.
+`verso.toml` is missing and a root package manifest exists, Verso releases the
+root package with built-in defaults. Package discovery supports `package.json`,
+`package.json5`, `package.yaml`, and `package.yml`.
 
 Create `verso.toml` only when you need to customize behavior. Single-package
 projects can start with:
@@ -56,6 +57,10 @@ Workspace projects can add package globs:
 [workspaces]
 patterns = ["packages/*"]
 ```
+
+When `workspaces.patterns` is omitted, Verso reads package manager workspace
+metadata from `pnpm-workspace.yaml` or root manifest `workspaces` before falling
+back to single-package mode.
 
 Then run:
 
