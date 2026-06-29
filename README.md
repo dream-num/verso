@@ -13,8 +13,6 @@ pushes with `git push --follow-tags`.
 
 ## Installation
 
-Verso requires Node.js 22.18.0 or newer.
-
 ```sh
 pnpm add -D @univerkit/verso
 ```

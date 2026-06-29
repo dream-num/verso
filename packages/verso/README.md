@@ -1,14 +1,8 @@
 # @univerkit/verso
 
-Verso is a focused release CLI for JavaScript packages and workspaces that
-publish related packages at the same version. It updates package manifests, writes an
-Angular-style changelog, creates a release commit and tag, and pushes with
-`git push --follow-tags`.
-
-This npm package is the JavaScript wrapper for the native Verso binary. The
-matching binary is installed through an optional platform package such as
-`@univerkit/verso-darwin-arm64`, `@univerkit/verso-linux-x64`, or
-`@univerkit/verso-win32-x64`.
+The JavaScript wrapper for the [Verso](https://github.com/dream-num/verso)
+release CLI. The native binary ships through an optional platform package; see
+[Supported Platforms](#supported-platforms).
 
 ## Supported Platforms
 
@@ -21,8 +15,6 @@ matching binary is installed through an optional platform package such as
 | Windows | x64 | `@univerkit/verso-win32-x64` |
 
 ## Installation
-
-Requires Node.js 22.18.0 or newer.
 
 ```sh
 pnpm add -D @univerkit/verso
@@ -38,70 +30,51 @@ Add a release script:
 }
 ```
 
-Single-package projects can run without `verso.toml`. When the default
-`verso.toml` is missing and a root package manifest exists, Verso releases the
-root package with built-in defaults. Package discovery supports `package.json`,
-`package.json5`, `package.yaml`, and `package.yml`.
+## Usage
 
-Create `verso.toml` only when you need to customize behavior. Single-package
-projects can start with:
-
-```toml
-[version]
-root_package = "package.json"
+```sh
+pnpm release                       # interactive version selection
+pnpm release -- --dry-run          # preview without writing
+pnpm release -- --version 1.2.3    # explicit version
+pnpm release -- --version 1.2.3 --yes
+pnpm release -- --dry-run --json   # JSON for CI / scripts
+pnpm release -- init               # write a starter verso.toml
+pnpm release -- doctor             # validate config + packages
+pnpm release -- -V                 # print wrapper version
 ```
 
-Workspace projects can add package globs:
+Without `--version`, Verso opens an interactive terminal menu. In
+non-terminal environments it keeps a plain text fallback for scripts and
+tests.
+
+A typical workspace project only needs `verso.toml` for the workspace globs:
 
 ```toml
 [workspaces]
 patterns = ["packages/*"]
 ```
 
-When `workspaces.patterns` is omitted, Verso reads package manager workspace
-metadata from `pnpm-workspace.yaml` or root manifest `workspaces` before falling
-back to single-package mode.
-
-Then run:
-
-```sh
-pnpm release
-pnpm release -- --dry-run
-pnpm release -- --dry-run --json
-pnpm release -- --version 1.2.3 --yes
-pnpm release -- init
-pnpm release -- doctor
-pnpm release -- -V
-```
-
-Without `--version`, Verso uses an interactive terminal menu for version
-selection. In non-terminal environments it keeps a plain text fallback for
-scripts and tests.
+Without `verso.toml`, Verso falls back to built-in defaults when a root
+`package.json` exists. For the full configuration reference, see the
+[repository README](https://github.com/dream-num/verso#configuration).
 
 ## Troubleshooting
 
-If running `verso` prints `Could not find Verso platform binary`, the native
-optional dependency for your operating system was not installed or is not
-available for your platform.
-
-Check these first:
+`Could not find Verso platform binary` — the native optional dependency for
+your OS wasn't installed or isn't available. Check:
 
 - install `@univerkit/verso`, not a platform package directly
-- make sure optional dependencies are enabled in your package manager
-- confirm your machine is one of the supported platform and CPU pairs above
-- reinstall from a fresh lockfile if the lockfile was created on a different
-  operating system or with optional dependencies disabled
+- optional dependencies are enabled in your package manager
+- your machine is one of the supported platform/CPU pairs above
+- reinstall from a fresh lockfile if the lockfile was made on a different OS
+  or with optional dependencies disabled
 
-If running `verso` prints `Failed to launch Verso binary`, the platform package
-was found but the native executable could not be started. On macOS and Linux,
-the wrapper repairs missing executable bits before spawning the native binary.
-Upgrade `@univerkit/verso`, reinstall dependencies, and include the error's
-cause line in bug reports if the failure continues.
+`Failed to launch Verso binary` — the platform package was found but the
+executable couldn't start. On macOS and Linux the wrapper repairs missing
+executable bits before spawning the binary. Upgrade `@univerkit/verso`,
+reinstall, and include the error's cause line in bug reports if it persists.
 
-An unsupported platform needs a new native package before the wrapper can run.
-For bug reports, include the output of `pnpm release -- -V`. The wrapper handles
-that command before loading the native binary, so it still works when the
-platform optional dependency is missing.
-
-See the repository README for the full configuration reference and release
-workflow details: https://github.com/dream-num/verso
+For unsupported platforms, a new native package is needed before the wrapper
+can run. Include `pnpm release -- -V` output in bug reports — the wrapper
+handles it before loading the native binary, so it still works when the
+optional dependency is missing.
