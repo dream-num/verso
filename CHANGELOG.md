@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0-beta.3](https://github.com/dream-num/verso/compare/v1.0.0-beta.2...v1.0.0-beta.3) (2026-06-29)
+
+### Features
+
+* support package manager manifests and interactive release prompts ([58bde75](https://github.com/dream-num/verso/commit/58bde751b17f05711b34b2d7d324c1dfbdf475b9))
+* support alternate package manifests and workspace metadata ([f9ecb79](https://github.com/dream-num/verso/commit/f9ecb79846b487cdff91b3e4cc93a34c350368cc))
+
+### Other Changes (doc)
+
+* update readme ([b15bf2d](https://github.com/dream-num/verso/commit/b15bf2d23b9e539be55edd18e65e0158c0e33692))
+
 ## [1.0.0-beta.2](https://github.com/dream-num/verso/compare/v1.0.0-beta.1...v1.0.0-beta.2) (2026-06-27)
 
 ### Features
