@@ -138,8 +138,10 @@ pub fn render_dry_run(root: &Path, plan: &ReleasePlan) -> String {
     output.push_str("\nVersion updates:\n");
     output.push_str(&render_tree(root, &version_files));
 
-    let changelog = relative_path(root, &plan.changelog_file);
-    output.push_str(&format!("\nChangelog: {}\n", changelog.display()));
+    output.push_str(&format!(
+        "\nChangelog: {}\n",
+        relative_string(root, &plan.changelog_file)
+    ));
 
     if !plan.hooks.is_empty() {
         output.push_str("\nPlanned hooks:\n");
@@ -154,7 +156,7 @@ pub fn render_dry_run(root: &Path, plan: &ReleasePlan) -> String {
     git_add_files.dedup();
     let git_add_args = git_add_files
         .iter()
-        .map(|file| shell_quote(&relative_path(root, file).display().to_string()))
+        .map(|file| shell_quote(&relative_string(root, file)))
         .collect::<Vec<_>>()
         .join(" ");
 
@@ -232,10 +234,12 @@ pub fn render_dry_run_styled(root: &Path, plan: &ReleasePlan) -> String {
     output.push_str(&section_title("Version updates"));
     output.push_str(&render_tree(root, &version_files));
 
-    let changelog = relative_path(root, &plan.changelog_file);
     output.push('\n');
     output.push_str(&section_title("Changelog"));
-    output.push_str(&format!("{}\n", changelog.display()));
+    output.push_str(&format!(
+        "{}\n",
+        relative_string(root, &plan.changelog_file)
+    ));
 
     if !plan.hooks.is_empty() {
         output.push('\n');
@@ -255,7 +259,7 @@ pub fn render_dry_run_styled(root: &Path, plan: &ReleasePlan) -> String {
     git_add_files.dedup();
     let git_add_args = git_add_files
         .iter()
-        .map(|file| shell_quote(&relative_path(root, file).display().to_string()))
+        .map(|file| shell_quote(&relative_string(root, file)))
         .collect::<Vec<_>>()
         .join(" ");
 
@@ -340,7 +344,36 @@ fn relative_path(root: &Path, path: &Path) -> PathBuf {
 }
 
 fn relative_string(root: &Path, path: &Path) -> String {
-    relative_path(root, path).display().to_string()
+    git_path_string(&relative_path(root, path))
+}
+
+fn git_path_string(path: &Path) -> String {
+    let mut output = String::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => {
+                output.push_str(&prefix.as_os_str().to_string_lossy());
+            }
+            Component::RootDir => {
+                if output.is_empty() || !output.ends_with('/') {
+                    output.push('/');
+                }
+            }
+            Component::CurDir => {}
+            Component::ParentDir => push_path_segment(&mut output, ".."),
+            Component::Normal(label) => {
+                push_path_segment(&mut output, &label.to_string_lossy());
+            }
+        }
+    }
+    output
+}
+
+fn push_path_segment(path: &mut String, segment: &str) {
+    if !path.is_empty() && !path.ends_with('/') {
+        path.push('/');
+    }
+    path.push_str(segment);
 }
 
 fn path_labels(path: &Path) -> Vec<String> {
@@ -525,6 +558,13 @@ mod tests {
         assert_eq!(output.matches("packages/a/package.json").count(), 1);
         assert!(output.contains("git add 'docs/CHANGELOG.md' 'packages/a/package.json'\n"));
         Ok(())
+    }
+
+    #[test]
+    fn dry_run_git_paths_use_forward_slashes() {
+        let path = PathBuf::from_iter(["packages", "a", "package.yaml"]);
+
+        assert_eq!(git_path_string(&path), "packages/a/package.yaml");
     }
 
     #[test]
