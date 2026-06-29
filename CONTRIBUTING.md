@@ -13,6 +13,8 @@ pnpm run check
 
 `pnpm run check` is what CI runs on Linux, macOS, and Windows. It covers:
 
+- `oxfmt --check` for TypeScript and `.mts` files
+- `oxlint`
 - `cargo fmt --check`
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`
 - `cargo test --locked --all`
@@ -24,16 +26,19 @@ merge.
 
 ## Code Standards
 
-Keep Rust formatted with rustfmt and free of clippy warnings. Keep the
-TypeScript wrapper strict-typecheck clean. Add or update tests for behavior
-changes — release flow, rollback, versioning, and package boundary changes in
-particular.
+Keep Rust formatted with rustfmt and free of clippy warnings. Keep TypeScript
+and `.mts` files formatted with oxfmt, linted with oxlint, and strict-typecheck
+clean. Add or update tests for behavior changes — release flow, rollback,
+versioning, and package boundary changes in particular.
 
 Prefer small, direct changes that match the existing structure. Verso is meant
 to stay focused, so new behavior should have a clear release-workflow use case.
 
-`.editorconfig` covers editor defaults; rustfmt and TypeScript remain the
-source of truth for generated formatting.
+`.editorconfig` covers editor defaults. VS Code users should install the
+recommended Oxc extension from `.vscode/extensions.json`; the workspace
+settings format JavaScript and TypeScript files on save. `pnpm install`
+installs a simple-git-hooks pre-commit hook that runs `pnpm run precommit`,
+which checks oxfmt, rustfmt, and oxlint before a commit is created.
 
 ## Package Topology
 

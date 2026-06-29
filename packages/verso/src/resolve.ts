@@ -5,15 +5,15 @@ export interface PlatformBinary {
 
 const supportedPackages = {
   darwin: {
-    arm64: '@univerkit/verso-darwin-arm64',
-    x64: '@univerkit/verso-darwin-x64',
+    arm64: "@univerkit/verso-darwin-arm64",
+    x64: "@univerkit/verso-darwin-x64",
   },
   linux: {
-    arm64: '@univerkit/verso-linux-arm64',
-    x64: '@univerkit/verso-linux-x64',
+    arm64: "@univerkit/verso-linux-arm64",
+    x64: "@univerkit/verso-linux-x64",
   },
   win32: {
-    x64: '@univerkit/verso-win32-x64',
+    x64: "@univerkit/verso-win32-x64",
   },
 } as const;
 
@@ -28,9 +28,8 @@ export function packageForPlatform(platform: string, arch: string): string {
     throw new Error(`Unsupported platform: ${platform} ${arch}`);
   }
 
-  const packageName = supportedPackages[platform][
-    arch as keyof (typeof supportedPackages)[SupportedPlatform]
-  ];
+  const packageName =
+    supportedPackages[platform][arch as keyof (typeof supportedPackages)[SupportedPlatform]];
 
   if (packageName === undefined) {
     throw new Error(`Unsupported platform: ${platform} ${arch}`);
@@ -40,7 +39,7 @@ export function packageForPlatform(platform: string, arch: string): string {
 }
 
 export function binaryName(platform: string): string {
-  return platform === 'win32' ? 'verso.exe' : 'verso';
+  return platform === "win32" ? "verso.exe" : "verso";
 }
 
 export function resolvePlatformBinary(

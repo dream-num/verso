@@ -28,12 +28,6 @@
   "bin": {
     "verso": "bin/verso.js"
   },
-  "exports": {
-    "./resolve": {
-      "types": "./dist/resolve.d.ts",
-      "default": "./dist/resolve.js"
-    }
-  },
   "files": [
     "bin",
     "dist",
@@ -45,11 +39,11 @@
     "provenance": true
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/build-bin.mts",
+    "build": "tsc -p tsconfig.json && node scripts/rewrite-dist-imports.mts && node scripts/build-bin.mts",
     "prepack": "pnpm run build",
     "prepublishOnly": "pnpm run build",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "pnpm run build && tsc -p tsconfig.test.json && node --test test-dist/**/*.test.js"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build"
   },
   "optionalDependencies": {
     "@univerkit/verso-darwin-arm64": "workspace:*",

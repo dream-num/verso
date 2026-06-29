@@ -1,6 +1,9 @@
 packages:
   - packages/*
 
+allowBuilds:
+  simple-git-hooks: true
+
 supportedArchitectures:
   os:
     - darwin

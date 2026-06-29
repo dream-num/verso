@@ -1,14 +1,14 @@
-import { chmodSync, statSync } from 'node:fs';
+import { chmodSync, statSync } from "node:fs";
 
 export function normalizeCliArgs(args: string[]): string[] {
-  return args[0] === '--' ? args.slice(1) : args;
+  return args[0] === "--" ? args.slice(1) : args;
 }
 
 export function isToolVersionRequest(args: string[]): boolean {
   const normalizedArgs = normalizeCliArgs(args);
   return (
     normalizedArgs.length === 1 &&
-    (normalizedArgs[0] === '-V' || normalizedArgs[0] === '--tool-version')
+    (normalizedArgs[0] === "-V" || normalizedArgs[0] === "--tool-version")
   );
 }
 
@@ -16,8 +16,11 @@ export function hasExecutableBit(mode: number): boolean {
   return (mode & 0o111) !== 0;
 }
 
-export function ensureExecutable(binaryPath: string, platform: NodeJS.Platform = process.platform): void {
-  if (platform === 'win32') {
+export function ensureExecutable(
+  binaryPath: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform === "win32") {
     return;
   }
 
@@ -36,11 +39,11 @@ export function formatLaunchError(binaryPath: string, error: Error): string {
     lines.push(`Reason: ${reason}`);
   }
 
-  if ((error as NodeJS.ErrnoException).code === 'EACCES') {
+  if ((error as NodeJS.ErrnoException).code === "EACCES") {
     lines.push(
-      'The binary is not executable. Reinstall @univerkit/verso, then check that your package manager installs optional dependencies and preserves executable file modes.',
+      "The binary is not executable. Reinstall @univerkit/verso, then check that your package manager installs optional dependencies and preserves executable file modes.",
     );
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
