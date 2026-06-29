@@ -10,10 +10,11 @@ use crate::{
     versioning::{bump_prerelease, bump_stable, parse_custom_version, BaseBump, PrereleaseChannel},
     workspace::PackageFile,
 };
+use inquire::{Confirm, Select, Text};
 use semver::Version;
 use std::{
-    fs,
-    io::{self, Write},
+    fmt, fs,
+    io::{self, IsTerminal, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -194,6 +195,33 @@ fn resolve_target_version(
 }
 
 fn prompt_target_version(current: &Version, assume_yes: bool) -> Result<Version, String> {
+    if interactive_terminal() {
+        return prompt_target_version_select(current, assume_yes);
+    }
+
+    prompt_target_version_text(current, assume_yes)
+}
+
+fn prompt_target_version_select(current: &Version, assume_yes: bool) -> Result<Version, String> {
+    match Select::new("Select target version", target_version_choices(current))
+        .prompt()
+        .map_err(inquire_error)?
+    {
+        TargetVersionChoice::Patch(version)
+        | TargetVersionChoice::Minor(version)
+        | TargetVersionChoice::Major(version) => Ok(version),
+        TargetVersionChoice::Alpha => prompt_prerelease_version(current, PrereleaseChannel::Alpha),
+        TargetVersionChoice::Beta => prompt_prerelease_version(current, PrereleaseChannel::Beta),
+        TargetVersionChoice::Rc => prompt_prerelease_version(current, PrereleaseChannel::Rc),
+        TargetVersionChoice::Custom => {
+            let target = parse_custom_version(&prompt_text("Version")?)?;
+            confirm_non_forward_version(current, &target, assume_yes)?;
+            Ok(target)
+        }
+    }
+}
+
+fn prompt_target_version_text(current: &Version, assume_yes: bool) -> Result<Version, String> {
     loop {
         let patch = bump_stable(current, BaseBump::Patch);
         let minor = bump_stable(current, BaseBump::Minor);
@@ -241,24 +269,136 @@ fn prompt_prerelease_version(
     current: &Version,
     channel: PrereleaseChannel,
 ) -> Result<Version, String> {
+    if interactive_terminal() {
+        return prompt_prerelease_version_select(current, channel);
+    }
+
+    prompt_prerelease_version_text(current, channel)
+}
+
+fn prompt_prerelease_version_select(
+    current: &Version,
+    channel: PrereleaseChannel,
+) -> Result<Version, String> {
+    match Select::new(
+        &format!("Select {} base", prerelease_channel_label(channel)),
+        prerelease_base_choices(current, channel),
+    )
+    .prompt()
+    .map_err(inquire_error)?
+    {
+        PrereleaseBaseChoice::Patch(version)
+        | PrereleaseBaseChoice::Minor(version)
+        | PrereleaseBaseChoice::Major(version) => Ok(version),
+        PrereleaseBaseChoice::Custom => {
+            let base = parse_custom_version(&prompt_text("Base version")?)?;
+            Ok(prerelease_from_custom_base(base, channel))
+        }
+    }
+}
+
+fn prompt_prerelease_version_text(
+    current: &Version,
+    channel: PrereleaseChannel,
+) -> Result<Version, String> {
     loop {
         let patch = bump_prerelease(current, BaseBump::Patch, channel);
         let minor = bump_prerelease(current, BaseBump::Minor, channel);
         let major = bump_prerelease(current, BaseBump::Major, channel);
-        let channel = prerelease_channel_label(channel);
+        let channel_label = prerelease_channel_label(channel);
 
-        println!("Select {channel} base:");
+        println!("Select {channel_label} base:");
         println!("  1) patch ({patch})");
         println!("  2) minor ({minor})");
         println!("  3) major ({major})");
+        println!("  4) custom base version");
 
         match read_prompt("Choice: ")?.as_str() {
             "1" | "patch" => return Ok(patch),
             "2" | "minor" => return Ok(minor),
             "3" | "major" => return Ok(major),
-            _ => println!("Please choose patch, minor, or major."),
+            "4" | "custom" | "custom base" | "custom base version" => {
+                let base = parse_custom_version(&read_prompt("Base version: ")?)?;
+                return Ok(prerelease_from_custom_base(base, channel));
+            }
+            _ => println!("Please choose patch, minor, major, or custom."),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TargetVersionChoice {
+    Patch(Version),
+    Minor(Version),
+    Major(Version),
+    Alpha,
+    Beta,
+    Rc,
+    Custom,
+}
+
+impl fmt::Display for TargetVersionChoice {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TargetVersionChoice::Patch(version) => write!(formatter, "patch ({version})"),
+            TargetVersionChoice::Minor(version) => write!(formatter, "minor ({version})"),
+            TargetVersionChoice::Major(version) => write!(formatter, "major ({version})"),
+            TargetVersionChoice::Alpha => formatter.write_str("alpha"),
+            TargetVersionChoice::Beta => formatter.write_str("beta"),
+            TargetVersionChoice::Rc => formatter.write_str("rc"),
+            TargetVersionChoice::Custom => formatter.write_str("custom semver"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PrereleaseBaseChoice {
+    Patch(Version),
+    Minor(Version),
+    Major(Version),
+    Custom,
+}
+
+impl fmt::Display for PrereleaseBaseChoice {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PrereleaseBaseChoice::Patch(version) => write!(formatter, "patch ({version})"),
+            PrereleaseBaseChoice::Minor(version) => write!(formatter, "minor ({version})"),
+            PrereleaseBaseChoice::Major(version) => write!(formatter, "major ({version})"),
+            PrereleaseBaseChoice::Custom => formatter.write_str("custom base version"),
+        }
+    }
+}
+
+fn target_version_choices(current: &Version) -> Vec<TargetVersionChoice> {
+    vec![
+        TargetVersionChoice::Patch(bump_stable(current, BaseBump::Patch)),
+        TargetVersionChoice::Minor(bump_stable(current, BaseBump::Minor)),
+        TargetVersionChoice::Major(bump_stable(current, BaseBump::Major)),
+        TargetVersionChoice::Alpha,
+        TargetVersionChoice::Beta,
+        TargetVersionChoice::Rc,
+        TargetVersionChoice::Custom,
+    ]
+}
+
+fn prerelease_base_choices(
+    current: &Version,
+    channel: PrereleaseChannel,
+) -> Vec<PrereleaseBaseChoice> {
+    vec![
+        PrereleaseBaseChoice::Patch(bump_prerelease(current, BaseBump::Patch, channel)),
+        PrereleaseBaseChoice::Minor(bump_prerelease(current, BaseBump::Minor, channel)),
+        PrereleaseBaseChoice::Major(bump_prerelease(current, BaseBump::Major, channel)),
+        PrereleaseBaseChoice::Custom,
+    ]
+}
+
+fn prerelease_from_custom_base(mut base: Version, channel: PrereleaseChannel) -> Version {
+    base.pre = semver::Prerelease::new(&format!("{}.0", prerelease_channel_label(channel)))
+        .expect("generated prerelease identifier should be valid semver");
+    base.build = semver::BuildMetadata::EMPTY;
+    base
 }
 
 fn prerelease_channel_label(channel: PrereleaseChannel) -> &'static str {
@@ -278,10 +418,42 @@ fn confirm_release_step(question: &str, assume_yes: bool) -> Result<(), String> 
 }
 
 fn confirm_default_yes(question: &str) -> Result<(), String> {
+    if interactive_terminal() {
+        return match Confirm::new(question)
+            .with_default(true)
+            .prompt()
+            .map_err(inquire_error)?
+        {
+            true => Ok(()),
+            false => Err("release aborted".to_string()),
+        };
+    }
+
     let answer = read_prompt(&format!("{question} [Y/n] "))?;
     match answer.as_str() {
         "" | "y" | "Y" | "yes" | "YES" | "Yes" => Ok(()),
         _ => Err("release aborted".to_string()),
+    }
+}
+
+fn prompt_text(question: &str) -> Result<String, String> {
+    if interactive_terminal() {
+        return Text::new(question).prompt().map_err(inquire_error);
+    }
+
+    read_prompt(&format!("{question}: "))
+}
+
+fn interactive_terminal() -> bool {
+    io::stdin().is_terminal() && io::stdout().is_terminal()
+}
+
+fn inquire_error(error: inquire::InquireError) -> String {
+    match error {
+        inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted => {
+            "release aborted".to_string()
+        }
+        error => format!("interactive prompt failed: {error}"),
     }
 }
 

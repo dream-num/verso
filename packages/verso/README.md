@@ -74,6 +74,10 @@ pnpm release -- doctor
 pnpm release -- -V
 ```
 
+Without `--version`, Verso uses an interactive terminal menu for version
+selection. In non-terminal environments it keeps a plain text fallback for
+scripts and tests.
+
 ## Troubleshooting
 
 If running `verso` prints `Could not find Verso platform binary`, the native

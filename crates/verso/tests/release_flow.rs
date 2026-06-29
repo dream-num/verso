@@ -693,6 +693,22 @@ fn interactive_beta_minor_dry_run_uses_computed_prerelease(
     Ok(())
 }
 
+#[test]
+fn interactive_prerelease_accepts_custom_base_version() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = TempDir::new()?;
+    write_release_fixture(repo.path())?;
+
+    Command::cargo_bin("verso")?
+        .current_dir(repo.path())
+        .args(["--dry-run"])
+        .write_stdin("beta\ncustom\n0.3.0\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Target version: 0.3.0-beta.0"));
+
+    Ok(())
+}
+
 fn init_repo(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     git(path, &["init"])?;
     git(path, &["config", "user.email", "test@example.com"])?;

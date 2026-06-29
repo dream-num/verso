@@ -156,9 +156,11 @@ pnpm release -- --help
 | `verso init` | 创建初始 `verso.toml`。会自动探测 `packages/*`，也可以用 `--single`、`--workspace`、`--force` 控制行为。 |
 | `verso doctor` | 校验配置解析、package 发现、版本一致性、changelog 路径和 Cargo manifest 版本。可用 `--json` 输出结构化结果。 |
 
-不传 `--version` 时，Verso 会交互式选择 patch、minor、major、alpha、beta、rc 或自定义 semver。`--version` 可以传精确版本，包括 `0.26.0-alpha.0`、`0.26.0-beta.1`、`0.26.0-rc.2` 这类 prerelease。
+不传 `--version` 时，Verso 会打开交互式菜单选择 patch、minor、major、alpha、beta、rc 或自定义 semver。选择 prerelease channel 后，会继续选择 base version，也支持输入自定义 base version。`--version` 可以传精确版本，包括 `0.26.0-alpha.0`、`0.26.0-beta.1`、`0.26.0-rc.2` 这类 prerelease。
 
 `--yes` 会跳过发布确认，包括目标版本不大于当前版本时的确认。它不会替你选择目标版本；没有 `--version` 时仍然会进入交互式版本选择。`-V` 和 `--tool-version` 会在读取发布配置前直接输出 CLI 版本，适合排查安装问题。
+
+当 stdin 或 stdout 不是终端时，Verso 会保留纯文本 fallback，脚本测试和管道输入仍然可以用名称选择，比如先输入 `beta`，再输入 `minor`。
 
 ## 发布时会发生什么
 

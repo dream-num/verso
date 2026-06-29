@@ -173,9 +173,11 @@ Subcommands:
 | `verso init` | Create a starter `verso.toml`. It auto-detects `packages/*`; use `--single`, `--workspace`, or `--force` to override behavior. |
 | `verso doctor` | Validate config parsing, package discovery, version consistency, changelog path, and Cargo manifest versions. Use `--json` for structured output. |
 
-Without `--version`, Verso prompts for patch, minor, major, alpha, beta, rc, or
-custom semver. Exact versions can be passed with `--version`, including
-prereleases such as `0.26.0-alpha.0`, `0.26.0-beta.1`, and `0.26.0-rc.2`.
+Without `--version`, Verso opens an interactive menu for patch, minor, major,
+alpha, beta, rc, or custom semver. Prerelease channels then prompt for a base
+version choice, including a custom base version. Exact versions can be passed
+with `--version`, including prereleases such as `0.26.0-alpha.0`,
+`0.26.0-beta.1`, and `0.26.0-rc.2`.
 
 Use `--config` to point at a different config file. Use `--yes` to skip release
 confirmation prompts, including the confirmation shown when an explicit target
@@ -183,6 +185,10 @@ version is not greater than the current version. `--yes` does not choose a
 version for you; without `--version`, interactive version selection still runs.
 Use `-V` or `--tool-version` to print the installed Verso CLI version without
 reading release config.
+
+When stdin or stdout is not attached to a terminal, Verso keeps a plain text
+prompt fallback so scripted tests and piped input can continue to choose by
+name, such as `beta` followed by `minor`.
 
 ## What A Release Does
 
