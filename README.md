@@ -31,43 +31,12 @@ Add a release script to your package manifest:
 
 ## Configuration
 
-Single-package projects can run without `verso.toml`. When the default
-`verso.toml` is missing and a root package manifest exists, Verso uses built-in
-defaults and releases the root package.
+Every key is optional. `verso init` writes a starter config; without one,
+Verso falls back to built-in defaults when a root `package.json` exists.
 
-Create `verso.toml` only when you need to customize behavior. For a
-single-package project, it can be minimal:
-
-```toml
-[version]
-root_package = "package.json"
-```
-
-For a workspace release, configure package globs:
-
-```toml
-[workspaces]
-patterns = [
-  "apps/*",
-  "examples/**",
-  "bundle/*",
-  "packages/*",
-  "!packages/**/fixtures",
-  "packages-experimental/*",
-  "presets/packages/*",
-]
-```
-
-If `workspaces.patterns` is omitted, Verso reads package manager workspace
-metadata before falling back to single-package mode. It supports
-`pnpm-workspace.yaml` `packages`, root manifest `workspaces: ["packages/*"]`,
-and root manifest `workspaces: { "packages": ["packages/*"] }`.
-
-Package discovery supports `package.json`, `package.json5`, `package.yaml`, and
-`package.yml`. When multiple manifest files exist in the same directory, Verso
-uses that order.
-
-The defaults are:
+Most workspace projects only need `workspaces.patterns`. If you omit it,
+Verso reads `pnpm-workspace.yaml` or the root manifest's `workspaces` field
+before falling back to single-package mode.
 
 ```toml
 [version]
@@ -76,6 +45,7 @@ require_consistent_versions = true
 cargo_manifest_paths = []
 
 [workspaces]
+patterns = []
 include_root = true
 ignore = []
 use_gitignore = true
@@ -90,54 +60,47 @@ commit_message = "chore(release): release v${version}"
 tag_name = "v${version}"
 push = "follow-tags"
 
+[hooks]
+# before_version = "pnpm test"
+# after_version = "pnpm build"
+# before_commit = "pnpm lint"
+# after_push = "node scripts/notify-release.mts"
+
 [github_release]
 enabled = false
 ```
 
-Hooks are optional and default to disabled:
+Explicit `--config <PATH>` values must always point at a real file. Package
+discovery supports `package.json`, `package.json5`, `package.yaml`, and
+`package.yml`; when several manifests sit in the same directory, Verso picks
+in that order.
 
-```toml
-[hooks]
-before_version = "pnpm test"
-after_version = "pnpm build"
-before_commit = "pnpm lint"
-after_push = "node scripts/notify-release.mts"
-```
+### All keys, most-tuned to least-tuned
 
-`changelog.preset` currently supports `angular` only. `git.push` currently
-supports `follow-tags` only. The CLI does not create GitHub Releases from
-project configs yet, so `github_release.enabled = true` is rejected.
-
-### Configuration Reference
-
-When `--config` is omitted and `verso.toml` is missing, Verso falls back to the
-built-in defaults only if a root package manifest exists. Explicit
-`--config <PATH>` values are always required to exist.
-
-| Key | Required | Default | Notes |
-| --- | --- | --- | --- |
-| `workspaces.patterns` | No | `[]` | Package workspace glob patterns relative to the config directory. Use forward slashes. Supports `*`, `**`, `?`, character classes, braces, and `!` exclusions. When omitted, Verso reads `pnpm-workspace.yaml` or root manifest `workspaces`; if neither exists, it uses single-package mode. |
-| `workspaces.include_root` | No | `true` | Include the root package selected by `version.root_package`. |
-| `workspaces.ignore` | No | `[]` | Extra workspace discovery ignore patterns. Plain path segments such as `fixtures` match directories by name. |
-| `workspaces.use_gitignore` | No | `true` | Respect root and nested `.gitignore` files during workspace discovery. |
-| `version.root_package` | No | `package.json` | Package manifest used for the current version and root update. Use forward slashes; must stay under the config directory. If omitted and `package.json` is absent, Verso looks for `package.json5`, `package.yaml`, then `package.yml`. |
-| `version.require_consistent_versions` | No | `true` | Fail when discovered packages or configured Cargo manifests do not share one version. |
-| `version.cargo_manifest_paths` | No | `[]` | Cargo manifests under the config directory whose `[package].version` should be updated. Use forward slashes. The nearest `Cargo.lock` is updated when present. |
-| `changelog.infile` | No | `CHANGELOG.md` | Changelog file prepended during release. Use forward slashes; must stay under the config directory. |
-| `changelog.preset` | No | `angular` | Only `angular` is supported. |
-| `git.require_clean_worktree` | No | `true` | Require a clean worktree before mutating files. |
-| `git.commit_message` | No | `chore(release): release v${version}` | `${version}` is replaced with the target version. Must not be empty. |
-| `git.tag_name` | No | `v${version}` | Must contain `${version}` and render a valid Git tag. |
-| `git.push` | No | `follow-tags` | Only `follow-tags` is supported. |
-| `github_release.enabled` | No | `false` | `true` is rejected in this version. |
-| `hooks.before_version` | No | None | Shell command run before release files are updated. |
-| `hooks.after_version` | No | None | Shell command run after release files are updated. |
-| `hooks.before_commit` | No | None | Shell command run before staging and committing. |
-| `hooks.after_commit` | No | None | Shell command run after the release commit is created. |
-| `hooks.before_tag` | No | None | Shell command run before the release tag is created. |
-| `hooks.after_tag` | No | None | Shell command run after the release tag is created. |
-| `hooks.before_push` | No | None | Shell command run before `git push --follow-tags`. |
-| `hooks.after_push` | No | None | Shell command run after the push succeeds. |
+| Key | Default | Description |
+| --- | --- | --- |
+| `workspaces.patterns` | `[]` | Workspace globs relative to the config directory. Forward slashes. Supports `*`, `**`, `?`, character classes, braces, and `!` exclusions. When omitted, reads `pnpm-workspace.yaml` or root manifest `workspaces`; otherwise single-package mode. |
+| `workspaces.include_root` | `true` | Include the package selected by `version.root_package`. |
+| `workspaces.ignore` | `[]` | Extra ignore patterns during discovery. Plain path segments such as `fixtures` match directories by name. |
+| `workspaces.use_gitignore` | `true` | Read root and nested `.gitignore` during discovery. Set `false` if a project intentionally publishes from ignored directories. |
+| `version.root_package` | `package.json` | Manifest read for the current version and root update. Forward slashes; must stay under the config directory. If omitted and `package.json` is absent, Verso tries `package.json5`, `package.yaml`, then `package.yml`. |
+| `version.require_consistent_versions` | `true` | Fail when discovered packages or configured Cargo manifests don't share one version. |
+| `version.cargo_manifest_paths` | `[]` | Cargo manifests whose `[package].version` is updated. The nearest `Cargo.lock` is updated when present. |
+| `changelog.infile` | `CHANGELOG.md` | Changelog file prepended during release. Forward slashes; must stay under the config directory. |
+| `changelog.preset` | `angular` | Only `angular` is supported. |
+| `git.require_clean_worktree` | `true` | Require a clean worktree before mutating files. |
+| `git.commit_message` | `chore(release): release v${version}` | `${version}` is replaced with the target version. Must not be empty. |
+| `git.tag_name` | `v${version}` | Must contain `${version}` and render a valid Git tag. |
+| `git.push` | `follow-tags` | Only `follow-tags` is supported. |
+| `hooks.before_version` | None | Shell command run before release files are updated. |
+| `hooks.after_version` | None | Shell command run after release files are updated. |
+| `hooks.before_commit` | None | Shell command run before staging and committing. |
+| `hooks.after_commit` | None | Shell command run after the release commit is created. |
+| `hooks.before_tag` | None | Shell command run before the release tag is created. |
+| `hooks.after_tag` | None | Shell command run after the release tag is created. |
+| `hooks.before_push` | None | Shell command run before `git push --follow-tags`. |
+| `hooks.after_push` | None | Shell command run after the push succeeds. |
+| `github_release.enabled` | `false` | `true` is rejected in this version. |
 
 ## CLI
 
@@ -190,37 +153,45 @@ name, such as `beta` followed by `minor`.
 
 ## What A Release Does
 
-Verso reads the config, discovers matching package manifests, checks that
-versions are consistent when configured to do so, and resolves the target
-version. During a real release, it asks for confirmation before updating release
-files, committing, tagging, and pushing. These confirmations default to yes:
-press Enter to continue, or answer `n` to stop before the next step. Passing
-`--yes` skips those confirmations. Updating release files changes package files,
-any configured Cargo manifests, and their nearest `Cargo.lock` files when
-present, and prepends `CHANGELOG.md`.
+```text
+            +----------------------------+
+            |  Read verso.toml +         |
+            |  discover manifests        |
+            +-------------+--------------+
+                          |
+                          v
+            +----------------------------+
+            |  Resolve version           |
+            |  (menu / --version)        |
+            +-------------+--------------+
+                          |
+                          v
+            +----------------------------+
+            |  Write version files       |
+            |  o manifests               |
+            |  o Cargo.toml + Cargo.lock |
+            |  o CHANGELOG.md prepend    |
+            +-------------+--------------+
+                          |
+                          v
+            +----------------------------+
+            |  Commit                    |
+            +-------------+--------------+
+                          |
+                          v
+            +----------------------------+
+            |  Tag                       |
+            +-------------+--------------+
+                          |
+                          v
+            +----------------------------+
+            |  git push --follow-tags    |
+            +----------------------------+
 
-Dry runs do not write files or run mutating git commands. They print the
-current version, target version, warnings, changelog path, planned git commands,
-planned hooks, and a tree of version files that would be updated. Dry runs list
-hooks but do not execute them.
-
-`--dry-run --json` prints the same release plan as structured JSON for scripts
-and CI systems.
-
-Workspace discovery always skips `.git` and `node_modules`. By default it also
-respects root and nested `.gitignore` files, so ignored directories are not
-scanned for release packages. Set `workspaces.use_gitignore = false` if a
-project intentionally publishes packages from ignored directories. Verso updates
-package manifest versions only; it does not rewrite workspace dependency ranges
-or run package-manager publish commands.
-
-If a local release command fails, Verso makes a best-effort rollback of files it
-modified, unstages release paths, and cleans up local release state where that
-is safe. If you answer `n` to a release confirmation, Verso stops without
-rolling back already completed steps. If the final push fails, the local release
-commit and tag are left in place so you can fix the remote problem and run
-`git push --follow-tags`. Rollback after a successful remote push is a manual
-operation.
+  -- [hooks] fire between steps
+  -- --dry-run short-circuits every mutating step (no writes, no git)
+  -- local failure: rollback files + unstage; push failure: keep commit/tag
+```
 
 Maintainer development and publishing details live in
 [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -1,3 +1,4 @@
+use anstyle::{AnsiColor, Style};
 use semver::Version;
 use serde_json::json;
 use std::{
@@ -173,6 +174,108 @@ pub fn render_dry_run(root: &Path, plan: &ReleasePlan) -> String {
     output
 }
 
+pub fn render_dry_run_styled(root: &Path, plan: &ReleasePlan) -> String {
+    let mut output = String::new();
+    let package_files = normalized_files(&plan.package_files);
+    let extra_version_files = normalized_files(&plan.extra_version_files);
+    let version_files = normalized_files(
+        &package_files
+            .iter()
+            .chain(extra_version_files.iter())
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+
+    output.push_str(&format!(
+        "{}DRY RUN{} {}\n",
+        style(Style::new().bold().fg_color(Some(AnsiColor::Cyan.into()))),
+        reset(),
+        style_text("Verso release preview", Style::new().bold())
+    ));
+    output.push_str(&format!(
+        "{} {}\n",
+        style_text("Version", Style::new().bold()),
+        style_text(
+            &format!("{} -> {}", plan.current_version, plan.target_version),
+            Style::new().fg_color(Some(AnsiColor::Green.into()))
+        )
+    ));
+    output.push_str(&format!(
+        "{} {}\n",
+        style_text("Packages", Style::new().bold()),
+        package_files.len()
+    ));
+    if !extra_version_files.is_empty() {
+        output.push_str(&format!(
+            "{} {}\n",
+            style_text("Extra version files", Style::new().bold()),
+            extra_version_files.len()
+        ));
+    }
+
+    if !plan.warnings.is_empty() {
+        output.push('\n');
+        output.push_str(&section_title("Warnings"));
+        for warning in &plan.warnings {
+            output.push_str(&format!(
+                "{} {}\n",
+                style_text(
+                    "!",
+                    Style::new().bold().fg_color(Some(AnsiColor::Yellow.into()))
+                ),
+                warning
+            ));
+        }
+    }
+
+    output.push('\n');
+    output.push_str(&section_title("Version updates"));
+    output.push_str(&render_tree(root, &version_files));
+
+    let changelog = relative_path(root, &plan.changelog_file);
+    output.push('\n');
+    output.push_str(&section_title("Changelog"));
+    output.push_str(&format!("{}\n", changelog.display()));
+
+    if !plan.hooks.is_empty() {
+        output.push('\n');
+        output.push_str(&section_title("Planned hooks"));
+        for hook in &plan.hooks {
+            output.push_str(&format!(
+                "{} {}\n",
+                style_text(&hook.name, Style::new().bold()),
+                hook.command
+            ));
+        }
+    }
+
+    let mut git_add_files = version_files;
+    git_add_files.push(plan.changelog_file.clone());
+    git_add_files.sort();
+    git_add_files.dedup();
+    let git_add_args = git_add_files
+        .iter()
+        .map(|file| shell_quote(&relative_path(root, file).display().to_string()))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    output.push('\n');
+    output.push_str(&section_title("Planned git commands"));
+    output.push_str(&command_line(&format!("git add {git_add_args}")));
+    output.push_str(&command_line(&format!(
+        "git commit -m {}",
+        shell_quote(&plan.commit_message)
+    )));
+    output.push_str(&command_line(&format!(
+        "git tag -a {} -m {}",
+        shell_quote(&plan.tag_name),
+        shell_quote(&plan.tag_name)
+    )));
+    output.push_str(&command_line("git push --follow-tags"));
+
+    output
+}
+
 pub fn render_tree(root: &Path, files: &[PathBuf]) -> String {
     let mut tree = TreeNode::default();
 
@@ -256,6 +359,36 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+fn section_title(label: &str) -> String {
+    format!(
+        "{}{}{}\n",
+        style(Style::new().bold().fg_color(Some(AnsiColor::Blue.into()))),
+        label,
+        reset()
+    )
+}
+
+fn command_line(command: &str) -> String {
+    format!(
+        "{}$ {}{}\n",
+        style(Style::new().fg_color(Some(AnsiColor::Magenta.into()))),
+        command,
+        reset()
+    )
+}
+
+fn style_text(value: &str, style: Style) -> String {
+    format!("{}{}{}", self::style(style), value, reset())
+}
+
+fn style(style: Style) -> String {
+    style.render().to_string()
+}
+
+fn reset() -> String {
+    "\u{1b}[0m".to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +442,42 @@ mod tests {
         assert!(output.contains("Warnings"));
         assert!(output.contains("working tree has generated files"));
         assert!(output.contains("git push --follow-tags"));
+        Ok(())
+    }
+
+    #[test]
+    fn styled_dry_run_distinguishes_sections_with_ansi() -> Result<(), String> {
+        let root = TempDir::new().map_err(|error| error.to_string())?;
+        let plan = test_plan(
+            root.path(),
+            vec![root.path().join("package.json")],
+            vec!["working tree has generated files".to_owned()],
+        )?;
+
+        let output = render_dry_run_styled(root.path(), &plan);
+
+        assert!(output.contains("\u{1b}["));
+        assert!(output.contains("DRY RUN"));
+        assert!(output.contains("1.2.3 -> 1.3.0"));
+        assert!(output.contains("Warnings"));
+        assert!(output.contains("!"));
+        assert!(output.contains("working tree has generated files"));
+        assert!(output.contains("$ git push --follow-tags"));
+        Ok(())
+    }
+
+    #[test]
+    fn plain_dry_run_does_not_emit_ansi() -> Result<(), String> {
+        let root = TempDir::new().map_err(|error| error.to_string())?;
+        let plan = test_plan(
+            root.path(),
+            vec![root.path().join("package.json")],
+            Vec::new(),
+        )?;
+
+        let output = render_dry_run(root.path(), &plan);
+
+        assert!(!output.contains("\u{1b}["));
         Ok(())
     }
 

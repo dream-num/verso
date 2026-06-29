@@ -4,7 +4,9 @@ use crate::{
     cli::Cli,
     config::{self, render_template},
     doctor,
-    dry_run::{render_dry_run, render_dry_run_json, PlannedHook, ReleasePlan},
+    dry_run::{
+        render_dry_run, render_dry_run_json, render_dry_run_styled, PlannedHook, ReleasePlan,
+    },
     git, package_json,
     rollback::ChangeSet,
     versioning::{bump_prerelease, bump_stable, parse_custom_version, BaseBump, PrereleaseChannel},
@@ -13,7 +15,7 @@ use crate::{
 use inquire::{Confirm, Select, Text};
 use semver::Version;
 use std::{
-    fmt, fs,
+    env, fmt, fs,
     io::{self, IsTerminal, Write},
     path::{Path, PathBuf},
     process::Command,
@@ -64,6 +66,8 @@ pub fn run(cli: Cli) -> Result<(), String> {
         };
         if cli.json {
             println!("{}", render_dry_run_json(&root, &plan));
+        } else if should_style_human_output() {
+            print!("{}", render_dry_run_styled(&root, &plan));
         } else {
             print!("{}", render_dry_run(&root, &plan));
         }
@@ -177,6 +181,12 @@ pub fn run(cli: Cli) -> Result<(), String> {
     run_hook(&root, "after_push", &config.hooks.after_push)?;
 
     Ok(())
+}
+
+fn should_style_human_output() -> bool {
+    io::stdout().is_terminal()
+        && env::var_os("NO_COLOR").is_none()
+        && env::var_os("TERM").is_none_or(|term| term != "dumb")
 }
 
 fn resolve_target_version(

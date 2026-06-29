@@ -28,35 +28,9 @@ pnpm add -D @univerkit/verso
 
 ## 配置
 
-单包项目可以不创建 `verso.toml`。默认 `verso.toml` 不存在且根目录有 package manifest 时，Verso 会使用内置默认配置发布根 package。
+所有配置项都可选。`verso init` 会生成一份示例配置；没有时，只要根目录存在 `package.json`，Verso 会使用内置默认值。
 
-只有需要自定义发布行为时才需要创建 `verso.toml`。单包项目的配置可以很轻量：
-
-```toml
-[version]
-root_package = "package.json"
-```
-
-workspace 发布再配置 package glob：
-
-```toml
-[workspaces]
-patterns = [
-  "apps/*",
-  "examples/**",
-  "bundle/*",
-  "packages/*",
-  "!packages/**/fixtures",
-  "packages-experimental/*",
-  "presets/packages/*",
-]
-```
-
-如果省略 `workspaces.patterns`，Verso 会先读取包管理器的 workspace 元数据，再回退到单包模式。它支持 `pnpm-workspace.yaml` 的 `packages`、根 package manifest 里的 `workspaces: ["packages/*"]`，以及 `workspaces: { "packages": ["packages/*"] }`。
-
-package 发现支持 `package.json`、`package.json5`、`package.yaml` 和 `package.yml`。同一个目录存在多个 manifest 时，按这个顺序选择。
-
-默认配置如下：
+大多数 workspace 项目只需要配 `workspaces.patterns`。省略它时，Verso 会先读 `pnpm-workspace.yaml` 或根 package manifest 的 `workspaces` 字段；都没有时回退到单包模式。
 
 ```toml
 [version]
@@ -65,6 +39,7 @@ require_consistent_versions = true
 cargo_manifest_paths = []
 
 [workspaces]
+patterns = []
 include_root = true
 ignore = []
 use_gitignore = true
@@ -79,50 +54,44 @@ commit_message = "chore(release): release v${version}"
 tag_name = "v${version}"
 push = "follow-tags"
 
+[hooks]
+# before_version = "pnpm test"
+# after_version = "pnpm build"
+# before_commit = "pnpm lint"
+# after_push = "node scripts/notify-release.mts"
+
 [github_release]
 enabled = false
 ```
 
-hooks 是可选配置，默认全部关闭：
+显式传入的 `--config <PATH>` 必须指向真实文件。package 发现支持 `package.json`、`package.json5`、`package.yaml` 和 `package.yml`；同一目录存在多个 manifest 时按这个顺序选择。
 
-```toml
-[hooks]
-before_version = "pnpm test"
-after_version = "pnpm build"
-before_commit = "pnpm lint"
-after_push = "node scripts/notify-release.mts"
-```
+### 所有配置项（按常用到非常用排序）
 
-`changelog.preset` 当前只支持 `angular`。`git.push` 当前只支持 `follow-tags`。Verso 目前不会根据项目配置创建 GitHub Release，因此 `github_release.enabled = true` 会被拒绝。
-
-### 配置项
-
-未传 `--config` 且默认 `verso.toml` 不存在时，如果根目录存在 package manifest，Verso 会回退到内置默认配置。显式传入的 `--config <PATH>` 必须存在。
-
-| 配置项 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `workspaces.patterns` | 否 | `[]` | 相对于配置文件目录的 package workspace glob。使用正斜杠，支持 `*`、`**`、`?`、字符类、brace，以及 `!` 排除模式。省略时会读取 `pnpm-workspace.yaml` 或根 package manifest 的 `workspaces`；如果都不存在，则使用单包模式。 |
-| `workspaces.include_root` | 否 | `true` | 是否包含 `version.root_package` 指向的根 package。 |
-| `workspaces.ignore` | 否 | `[]` | workspace 发现时额外忽略的模式。`fixtures` 这类普通路径片段会按目录名匹配。 |
-| `workspaces.use_gitignore` | 否 | `true` | workspace 发现时是否读取根目录和子目录里的 `.gitignore`。 |
-| `version.root_package` | 否 | `package.json` | 用于读取当前版本并参与更新的根 package manifest。路径必须在配置文件目录内。省略且 `package.json` 不存在时，Verso 会依次查找 `package.json5`、`package.yaml`、`package.yml`。 |
-| `version.require_consistent_versions` | 否 | `true` | 发现 package 或配置的 Cargo manifest 版本不一致时是否失败。 |
-| `version.cargo_manifest_paths` | 否 | `[]` | 需要同步更新 `[package].version` 的 Cargo manifest 路径。存在最近的 `Cargo.lock` 时会一起更新。 |
-| `changelog.infile` | 否 | `CHANGELOG.md` | 发布时写入的 changelog 文件。路径必须在配置文件目录内。 |
-| `changelog.preset` | 否 | `angular` | 目前只支持 `angular`。 |
-| `git.require_clean_worktree` | 否 | `true` | 修改文件前要求工作区干净。 |
-| `git.commit_message` | 否 | `chore(release): release v${version}` | release commit message。`${version}` 会替换为目标版本。 |
-| `git.tag_name` | 否 | `v${version}` | release tag 模板。必须包含 `${version}`，并渲染为合法 Git tag。 |
-| `git.push` | 否 | `follow-tags` | 目前只支持 `follow-tags`。 |
-| `github_release.enabled` | 否 | `false` | 当前版本不支持设为 `true`。 |
-| `hooks.before_version` | 否 | 无 | 更新 release 文件前执行的 shell 命令。 |
-| `hooks.after_version` | 否 | 无 | 更新 release 文件后执行的 shell 命令。 |
-| `hooks.before_commit` | 否 | 无 | 暂存并提交前执行的 shell 命令。 |
-| `hooks.after_commit` | 否 | 无 | release commit 创建后执行的 shell 命令。 |
-| `hooks.before_tag` | 否 | 无 | 创建 release tag 前执行的 shell 命令。 |
-| `hooks.after_tag` | 否 | 无 | release tag 创建后执行的 shell 命令。 |
-| `hooks.before_push` | 否 | 无 | 执行 `git push --follow-tags` 前执行的 shell 命令。 |
-| `hooks.after_push` | 否 | 无 | push 成功后执行的 shell 命令。 |
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `workspaces.patterns` | `[]` | 相对于配置文件目录的 workspace glob。正斜杠，支持 `*`、`**`、`?`、字符类、brace，以及 `!` 排除。省略时读取 `pnpm-workspace.yaml` 或根 manifest 的 `workspaces`，否则单包模式。 |
+| `workspaces.include_root` | `true` | 是否包含 `version.root_package` 指向的根 package。 |
+| `workspaces.ignore` | `[]` | workspace 发现时额外忽略的模式。`fixtures` 这类普通路径片段按目录名匹配。 |
+| `workspaces.use_gitignore` | `true` | workspace 发现时是否读取根目录和子目录里的 `.gitignore`。如果项目要发布被 `.gitignore` 忽略的目录，设为 `false`。 |
+| `version.root_package` | `package.json` | 用于读取当前版本并参与更新的根 package manifest。路径必须在配置文件目录内。省略且 `package.json` 不存在时，Verso 依次尝试 `package.json5`、`package.yaml`、`package.yml`。 |
+| `version.require_consistent_versions` | `true` | 发现 package 或配置的 Cargo manifest 版本不一致时是否失败。 |
+| `version.cargo_manifest_paths` | `[]` | 需要同步更新 `[package].version` 的 Cargo manifest 路径。存在最近的 `Cargo.lock` 时会一起更新。 |
+| `changelog.infile` | `CHANGELOG.md` | 发布时写入的 changelog 文件。路径必须在配置文件目录内。 |
+| `changelog.preset` | `angular` | 目前只支持 `angular`。 |
+| `git.require_clean_worktree` | `true` | 修改文件前要求工作区干净。 |
+| `git.commit_message` | `chore(release): release v${version}` | release commit message，`${version}` 会替换为目标版本。 |
+| `git.tag_name` | `v${version}` | release tag 模板。必须包含 `${version}` 并渲染为合法 Git tag。 |
+| `git.push` | `follow-tags` | 目前只支持 `follow-tags`。 |
+| `hooks.before_version` | 无 | 更新 release 文件前执行的 shell 命令。 |
+| `hooks.after_version` | 无 | 更新 release 文件后执行的 shell 命令。 |
+| `hooks.before_commit` | 无 | 暂存并提交前执行的 shell 命令。 |
+| `hooks.after_commit` | 无 | release commit 创建后执行的 shell 命令。 |
+| `hooks.before_tag` | 无 | 创建 release tag 前执行的 shell 命令。 |
+| `hooks.after_tag` | 无 | release tag 创建后执行的 shell 命令。 |
+| `hooks.before_push` | 无 | 执行 `git push --follow-tags` 前执行的 shell 命令。 |
+| `hooks.after_push` | 无 | push 成功后执行的 shell 命令。 |
+| `github_release.enabled` | `false` | 当前版本不支持设为 `true`。 |
 
 ## CLI
 
@@ -164,12 +133,44 @@ pnpm release -- --help
 
 ## 发布时会发生什么
 
-Verso 会读取配置，发现匹配的 package manifest，在启用一致性检查时确认版本一致，然后解析目标版本。实际发布时，它会在更新 release 文件、提交、打 tag、推送前分别请求确认。这些确认默认是 yes：直接回车会继续，输入 `n` 会在下一步开始前停止；传入 `--yes` 时这些确认会被跳过。更新 release 文件会修改 package 文件、配置的 Cargo manifest 以及对应最近的 `Cargo.lock`，并把 `CHANGELOG.md` 追加到顶部。
+```text
+            +----------------------------+
+            |  读取 verso.toml +         |
+            |  发现 package manifest     |
+            +-------------+--------------+
+                          |
+                          v
+            +----------------------------+
+            |  解析目标版本              |
+            |  (交互菜单 / --version)    |
+            +-------------+--------------+
+                          |
+                          v
+            +----------------------------+
+            |  写入版本文件              |
+            |  o package manifest        |
+            |  o Cargo.toml + Cargo.lock |
+            |  o CHANGELOG.md 顶部插入   |
+            +-------------+--------------+
+                          |
+                          v
+            +----------------------------+
+            |  Commit                    |
+            +-------------+--------------+
+                          |
+                          v
+            +----------------------------+
+            |  Tag                       |
+            +-------------+--------------+
+                          |
+                          v
+            +----------------------------+
+            |  git push --follow-tags    |
+            +----------------------------+
 
-Dry run 不会写文件，也不会执行会修改状态的 git 命令。它会打印当前版本、目标版本、警告、changelog 路径、计划执行的 git 命令、计划执行的 hooks，以及将被更新的版本文件树。Dry run 只列出 hooks，不会执行 hooks。`--dry-run --json` 会输出结构化 release plan，方便脚本和 CI 读取。
-
-workspace 发现始终跳过 `.git` 和 `node_modules`。默认也会读取根目录和子目录里的 `.gitignore`，被忽略的目录不会继续扫描，即使里面有 package manifest 也不会被当作发布包。如果项目确实要发布被 `.gitignore` 忽略的目录，可以设置 `workspaces.use_gitignore = false`。Verso 只更新 package manifest 的版本，不会改写 workspace 内部依赖范围，也不会执行包管理器的 publish 命令。
-
-如果本地发布命令执行失败，Verso 会尽力回滚自己修改过的文件、取消暂存 release 路径，并在安全时清理本地 release 状态。如果你在发布确认里输入 `n`，Verso 会停止流程，但不会回滚已经完成的步骤。如果最后 push 失败，本地 release commit 和 tag 会保留，你可以修复远端问题后执行 `git push --follow-tags`。远端 push 成功后的回滚需要手动处理。
+  -- [hooks] 在每一步之间执行
+  -- --dry-run 跳过所有修改操作（不写文件、不跑 git）
+  -- 本地失败：回滚文件 + 取消暂存；push 失败：保留 commit/tag
+```
 
 维护者开发和发布流程见英文文档：[CONTRIBUTING.md](CONTRIBUTING.md)。

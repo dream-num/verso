@@ -21,6 +21,7 @@ name = "verso"
 path = "src/main.rs"
 
 [dependencies]
+anstyle = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
 globset = "0.4"
