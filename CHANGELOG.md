@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.0-rc.0](https://github.com/dream-num/verso/compare/v1.0.0-beta.3...v1.0.0-rc.0) (2026-06-29)
+
+### Bug Fixes
+
+* normalize dry-run paths across platforms ([01e25f0](https://github.com/dream-num/verso/commit/01e25f03e0d79c772378d304011574e342f26f44))
+
+### Features
+
+* **release:** add styled dry-run output ([fc7c18c](https://github.com/dream-num/verso/commit/fc7c18cdee4f0a67be3958186c14fade84929ca9))
+
+### Other Changes (chore)
+
+* simplify CI configuration and update format scripts ([62b4915](https://github.com/dream-num/verso/commit/62b49158d574474a0eb02c291ffd28c73faf14ec))
+* add pre-commit formatting and lint checks ([08cb668](https://github.com/dream-num/verso/commit/08cb668ef586568ce2b882a92d26d9c992ee6a46))
+
+### Other Changes (doc)
+
+* update README ([fc91e92](https://github.com/dream-num/verso/commit/fc91e92c8428d9784ed9eefdabceb51a70eff71d))
+
 ## [1.0.0-beta.3](https://github.com/dream-num/verso/compare/v1.0.0-beta.2...v1.0.0-beta.3) (2026-06-29)
 
 ### Features
