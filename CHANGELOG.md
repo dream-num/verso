@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.0-rc.1](https://github.com/dream-num/verso/compare/v1.0.0-rc.0...v1.0.0-rc.1) (2026-06-30)
+
+### Other Changes (build)
+
+* keep published dist output flat ([37c8bd3](https://github.com/dream-num/verso/commit/37c8bd3b6a4962cfea6b2935936cacd7d7fd3f88))
+
 ## [1.0.0-rc.0](https://github.com/dream-num/verso/compare/v1.0.0-beta.3...v1.0.0-rc.0) (2026-06-29)
 
 ### Bug Fixes
